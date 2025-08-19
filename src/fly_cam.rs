@@ -1,5 +1,10 @@
+use avian3d::prelude as avian;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
+use iyes_perf_ui::prelude::PerfUiAllEntries;
+
+use bevister::plugin::EditOp;
+use bevister::plugin::VoxelEditEvent;
 
 #[derive(Component)]
 pub struct FlyCamCtx;
@@ -43,7 +48,21 @@ pub struct AimRmb;
 #[action_output(bool)]
 pub struct Boost;
 
+#[derive(InputAction)]
+#[action_output(bool)]
+pub struct Dig;
+
+#[derive(InputAction)]
+#[action_output(bool)]
+pub struct SpawnBall;
+
+#[derive(InputAction)]
+#[action_output(bool)]
+pub struct Place;
+
 pub fn setup(mut commands: Commands) {
+    commands.spawn(PerfUiAllEntries::default());
+
     commands.insert_resource(FlyCamTuning::default());
 
     commands.spawn((
@@ -69,6 +88,18 @@ pub fn setup(mut commands: Commands) {
                 Action::<Boost>::new(),
                 bindings![KeyCode::ControlLeft],
             ),
+            (
+                Action::<Dig>::new(),
+                bindings![KeyCode::KeyE],
+            ),
+            (
+                Action::<SpawnBall>::new(),
+                bindings![KeyCode::KeyF],
+            ),
+            (
+                Action::<Place>::new(),
+                bindings![KeyCode::KeyR],
+            ),
         ]),
     ));
 
@@ -81,6 +112,94 @@ pub fn setup(mut commands: Commands) {
         },
         Transform::default().looking_at(-Vec3::Y, Vec3::Z),
     ));
+}
+
+pub fn interact(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut evw_dig: EventWriter<VoxelEditEvent>,
+    q_cam: Query<(&GlobalTransform, &Actions<FlyCamCtx>)>,
+    q_dig: Query<&Action<Dig>>,
+    q_shoot: Query<&Action<SpawnBall>>,
+    q_place: Query<&Action<Place>>,
+    mut spatial_query: avian::SpatialQuery,
+) {
+    for (xf, actions) in q_cam.iter() {
+        let cam_pos = xf.translation();
+        let forward = -xf.compute_transform().forward();
+
+        for ent in actions.iter() {
+            if let Ok(d) = q_dig.get(ent) {
+                if **d {
+                    let dir_vec = -forward.normalize_or_zero();
+                    let max_t = 100.0;
+                    let mut hit_point = cam_pos + dir_vec * max_t;
+                    // Update and cast ray via Avian3D SpatialQuery; fall back to max distance if nothing hit
+                    spatial_query.update_pipeline();
+                    if let Some(hit) = spatial_query.cast_ray(
+                        cam_pos,
+                        Dir3::new_unchecked(dir_vec),
+                        max_t,
+                        true,
+                        &avian::SpatialQueryFilter::default(),
+                    ) {
+                        hit_point = cam_pos + dir_vec * hit.distance;
+                    }
+                    evw_dig.send(VoxelEditEvent {
+                        center_world: hit_point,
+                        radius: 3.0,
+                        op: EditOp::Destroy,
+                    });
+                }
+            }
+            if let Ok(p) = q_place.get(ent) {
+                if **p {
+                    let dir_vec = -forward.normalize_or_zero();
+                    let max_t = 100.0;
+                    let mut hit_point = cam_pos + dir_vec * max_t;
+                    spatial_query.update_pipeline();
+                    if let Some(hit) = spatial_query.cast_ray(
+                        cam_pos,
+                        Dir3::new_unchecked(dir_vec),
+                        max_t,
+                        true,
+                        &avian::SpatialQueryFilter::default(),
+                    ) {
+                        hit_point = cam_pos + dir_vec * hit.distance;
+                    }
+                    evw_dig.send(VoxelEditEvent {
+                        center_world: hit_point,
+                        radius: 2.0,
+                        op: EditOp::Place,
+                    });
+                }
+            }
+            if let Ok(s) = q_shoot.get(ent) {
+                if **s {
+                    let radius = 0.5;
+                    let start = cam_pos - forward * 2.0;
+                    let velocity = Vec3::ZERO;
+
+                    let mesh = meshes.add(Mesh::from(Sphere::new(radius)));
+                    let mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.9, 0.2, 0.2),
+                        ..Default::default()
+                    });
+
+                    commands.spawn((
+                        avian::RigidBody::Dynamic,
+                        avian::Collider::sphere(radius),
+                        Mesh3d(mesh),
+                        MeshMaterial3d(mat),
+                        Transform::from_translation(start),
+                        GlobalTransform::default(),
+                        avian::LinearVelocity(velocity),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 pub fn mouse_look(

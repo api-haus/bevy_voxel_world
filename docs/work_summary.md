@@ -25,6 +25,17 @@
 - Added `buffer_to_meshes_per_material` skeleton (single-material path for now).
 - Extended unit tests: empty/solid skip, simple interface, gradient sanity.
 
+- Dispatch extensions & tests:
+  - Extended `remesh_chunk_dispatch` to support 32^3 core (34^3 sample) in addition to 16^3.
+  - Added unit tests for dispatch (supported vs unsupported dims) and a single-bucket mesh conversion sanity check.
+
+- Scheduler/Apply telemetry:
+  - Added `VoxelTelemetry { total_meshed, meshed_this_frame, queue_len }` resource.
+  - Wired `update_telemetry_begin` to reset per-frame counters and sample queue length.
+  - Increment counters in `apply_remeshes` when meshes are applied.
+  - Stubbed `VoxelEditEvent` handling to enqueue affected chunks (all chunks for now), to evolve later to precise region mapping.
+  - Gated debug SDF seeding behind `cfg!(debug_assertions)` to keep release builds clean; future switch to a `dev` Cargo feature possible.
+
 - Scheduler & apply (minimal Phase 4 stub):
 - Introduced `RemeshBudget { max_chunks_per_frame, time_slice_ms }`, a global `RemeshQueue`, and a background Rayon job that runs Surface Nets and sends a `RemeshReady` event.
 - Startup seeding still writes the debug sphere SDF, but now enqueues chunk entities into the remesh queue instead of meshing immediately.
@@ -34,8 +45,31 @@
 - `cargo test` should be green, including new meshing tests and an ECS spawn test.
 - `cargo run --features bevy/dynamic_linking` will show the debug sphere via the new queue+apply path. Meshes appear after background jobs complete.
 
+- Additional verify hints:
+  - Run meshing tests directly: `cargo test --lib meshing::surface_nets::tests`.
+  - Check telemetry updates by running the app; counters are maintained internally (exposed publicly in a later step).
+
 - Camera & controls:
 - Replaced previous demo camera/player with a lightweight fly camera (`src/fly_cam.rs`) wired in `src/main.rs`.
 - Mouse-look when RMB is held; WASD + Space/Shift for movement; Ctrl for speed boost. Adds a directional light.
 
 
+
+ - Demo content & seeding:
+   - Switched the demo to a `16×16×16` chunk grid (`VoxelVolumeDesc::default().grid_dims`).
+   - Startup SDF is now a field of random spheres distributed across the whole volume, generated in parallel with AABB culling (Rayon) and then applied to each chunk’s `VoxelStorage`.
+
+ - Editing & input:
+   - Introduced `EditOp::{Destroy, Place}` and extended `VoxelEditEvent { center_world, radius, op }`.
+   - Added sphere-cast edit application that updates SDF including apron and adjusts material on sign transitions; enqueues chunks for remesh.
+   - `src/fly_cam.rs` actions: E = dig (Destroy), R = place (Place), F = spawn physics ball. Dig/place use Avian3D `SpatialQuery` raycast from viewport center (max 100 units).
+
+ - Physics colliders:
+   - On mesh apply, build/replace a static `Collider::trimesh_from_mesh` (Avian3D) for each chunk alongside the render `Mesh3d` (no debounce).
+
+ - Rendering/culling:
+   - Ensure render bounds update on remesh by computing the mesh AABB before inserting the mesh asset (`MeshAabb::compute_aabb`), keeping frustum culling correct as geometry changes.
+
+ - How to run/verify (updated):
+   - `cargo test` remains green, including meshing tests.
+   - `cargo run --features bevy/dynamic_linking` spawns the `16×16×16` volume seeded with random spheres. Use E/R to dig/place at the crosshair and F to spawn a ball; meshes and colliders update immediately and cull correctly.

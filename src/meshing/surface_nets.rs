@@ -57,6 +57,9 @@ pub fn remesh_chunk_dispatch(storage: &VoxelStorage) -> Option<SurfaceNetsBuffer
     if s.x == 18 && s.y == 18 && s.z == 18 {
         return remesh_chunk_fixed::<18, 18, 18>(storage);
     }
+    if s.x == 34 && s.y == 34 && s.z == 34 {
+        return remesh_chunk_fixed::<34, 34, 34>(storage);
+    }
     None
 }
 
@@ -142,5 +145,64 @@ mod tests {
         let g = central_gradient(f, Vec3::new(0.0, 0.0, 0.0), 1.0);
         let err = (g - Vec3::X).length();
         assert!(err < 1e-5, "gradient {:?} too far from expected", g);
+    }
+
+    #[test]
+    fn dispatch_supported_vs_unsupported() {
+        // 16^3 core -> 18^3 sample (supported)
+        let mut s16 = VoxelStorage::new(UVec3::new(16, 16, 16));
+        s16.fill_default(1.0, 0);
+        let sz = s16.dims.sample;
+        for z in 0..(sz.z / 2) {
+            for y in 0..sz.y {
+                for x in 0..sz.x {
+                    *s16.sdf_mut_at(x, y, z) = -1.0;
+                }
+            }
+        }
+        assert!(remesh_chunk_dispatch(&s16).is_some());
+
+        // 32^3 core -> 34^3 sample (now supported)
+        let mut s32 = VoxelStorage::new(UVec3::new(32, 32, 32));
+        s32.fill_default(1.0, 0);
+        let sz = s32.dims.sample;
+        for z in 0..(sz.z / 2) {
+            for y in 0..sz.y {
+                for x in 0..sz.x {
+                    *s32.sdf_mut_at(x, y, z) = -1.0;
+                }
+            }
+        }
+        assert!(remesh_chunk_dispatch(&s32).is_some());
+
+        // 8^3 core -> 10^3 sample (unsupported)
+        let mut s8 = VoxelStorage::new(UVec3::new(8, 8, 8));
+        s8.fill_default(1.0, 0);
+        let sz = s8.dims.sample;
+        for z in 0..(sz.z / 2) {
+            for y in 0..sz.y {
+                for x in 0..sz.x {
+                    *s8.sdf_mut_at(x, y, z) = -1.0;
+                }
+            }
+        }
+        assert!(remesh_chunk_dispatch(&s8).is_none());
+    }
+
+    #[test]
+    fn buffer_to_meshes_single_bucket_sanity() {
+        let mut storage = VoxelStorage::new(UVec3::new(16, 16, 16));
+        storage.fill_default(1.0, 0);
+        let sz = storage.dims.sample;
+        for z in 0..(sz.z / 2) {
+            for y in 0..sz.y {
+                for x in 0..sz.x {
+                    *storage.sdf_mut_at(x, y, z) = -1.0;
+                }
+            }
+        }
+        let buffer = remesh_chunk_dispatch(&storage).expect("mesh expected");
+        let meshes = buffer_to_meshes_per_material(&buffer, None);
+        assert_eq!(meshes.len(), 1);
     }
 }
