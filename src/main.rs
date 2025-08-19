@@ -2,36 +2,22 @@ use bevy::prelude::*;
 
 use avian3d::prelude::*;
 
-use bevy_tnua::prelude::*;
-use bevy_tnua_avian3d::*;
+use bevy_enhanced_input::prelude::InputContextAppExt;
 
 mod demo1;
+mod fly_cam;
 mod rayon_chunks;
-mod chunks_bevy;
 
 fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
             PhysicsPlugins::default(),
-            // We need both Tnua's main controller plugin, and the plugin to connect to the physics
-            // backend (in this case Avian 3D)
-            TnuaControllerPlugin::new(FixedUpdate),
-            TnuaAvian3dPlugin::new(FixedUpdate),
+            bevy_enhanced_input::prelude::EnhancedInputPlugin,
+            bevister::plugin::VoxelPlugin,
         ))
-        .add_systems(
-            Startup,
-            (
-                demo1::setup_camera_and_lights,
-                demo1::setup_level,
-                demo1::setup_player,
-                chunks_bevy::setup_chunks,
-            ),
-        )
-        .add_systems(
-            FixedUpdate,
-            demo1::apply_controls.in_set(TnuaUserControlsSystemSet),
-        )
+        .add_input_context::<fly_cam::FlyCamCtx>()
+        .add_systems(Startup, fly_cam::setup)
+        .add_systems(Update, (fly_cam::mouse_look, fly_cam::movement))
         .run();
 }
-
