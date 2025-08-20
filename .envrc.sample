@@ -1,0 +1,28 @@
+# bevister direnv environment sample
+# Copy this file to .envrc and run: `direnv allow`
+
+# Device selection (leave empty to auto-detect device/simulator)
+export DEVICE_ID=""
+export IOS_DEVICE_ID=""
+
+# Code signing configuration
+# Your 10-character Apple Developer Team ID (required for device builds)
+export DEVELOPMENT_TEAM=""
+
+# "Automatic" (recommended) or "Manual"
+export CODE_SIGN_STYLE="Automatic"
+
+# Signing identity: common name or SHA-1
+# Examples: "Apple Development" or a SHA-1 like "AA0794675896C52D9B571AF2422C19632DD8A72A"
+export CODE_SIGN_IDENTITY="Apple Development"
+
+# Provisioning profile specifier (name or UUID). Leave empty when using Automatic signing
+export PROVISIONING_PROFILE_SPECIFIER=""
+
+# Optional: override bundle identifier (Taskfile defaults to org.bevyengine.example)
+# export BUNDLE_ID="org.bevyengine.example"
+
+# Helpful commands:
+# - List connected devices: xcrun xcdevice list
+# - List signing identities: security find-identity -p codesigning -v | cat
+

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "1640"
+   LastUpgradeVersion = "1310"
    version = "1.3">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "3BDB8152E4962373181B4FE5"
-               BuildableName = "bevy_mobile_example.app"
-               BlueprintName = "bevy_mobile_example"
-               ReferencedContainer = "container:bevy_mobile_example.xcodeproj">
+               BuildableName = "bevister.app"
+               BlueprintName = "bevister"
+               ReferencedContainer = "container:bevister.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -45,9 +45,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "3BDB8152E4962373181B4FE5"
-            BuildableName = "bevy_mobile_example.app"
-            BlueprintName = "bevy_mobile_example"
-            ReferencedContainer = "container:bevy_mobile_example.xcodeproj">
+            BuildableName = "bevister.app"
+            BlueprintName = "bevister"
+            ReferencedContainer = "container:bevister.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -62,9 +62,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "3BDB8152E4962373181B4FE5"
-            BuildableName = "bevy_mobile_example.app"
-            BlueprintName = "bevy_mobile_example"
-            ReferencedContainer = "container:bevy_mobile_example.xcodeproj">
+            BuildableName = "bevister.app"
+            BlueprintName = "bevister"
+            ReferencedContainer = "container:bevister.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
