@@ -22,11 +22,17 @@ mesh_to_sdf = "0.4.0"
 rand = "0.9.2"
 rayon = "1.11.0"
 taffy = "0.9.0"
+tracing = "0.1.41"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
 codegen-backend = "cranelift"
+
+# Use LLVM instead of Cranelift for targets that require it (selected via --profile dev-llvm)
+[profile.dev-llvm]
+inherits = "dev"
+codegen-backend = "llvm"
 
 # Enable a large amount of optimization in the dev profile for dependencies.
 [profile.dev.package."*"]

@@ -80,6 +80,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::meshing::bevy_mesh::buffer_to_meshes_per_material;
     use ilattice::prelude::UVec3;
 
     #[test]

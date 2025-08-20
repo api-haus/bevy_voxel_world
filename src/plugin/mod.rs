@@ -33,7 +33,7 @@ pub(crate) use scheduler::{
     RemeshBudget, RemeshQueue, RemeshResultChannel, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
 pub(crate) use telemetry::VoxelTelemetry;
-use telemetry::update_telemetry_begin;
+use telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
 
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct VoxelVolumeDesc {
@@ -93,6 +93,7 @@ impl Plugin for VoxelPlugin {
             .init_resource::<RemeshBudget>()
             .init_resource::<RemeshQueue>()
             .init_resource::<VoxelTelemetry>()
+            .init_resource::<scheduler::RemeshInFlightTimings>()
             .add_event::<VoxelEditEvent>()
             .add_event::<RemeshReady>()
             .configure_sets(
@@ -111,28 +112,33 @@ impl Plugin for VoxelPlugin {
                     tx,
                     rx: Arc::new(Mutex::new(rx)),
                 }
-            })
-            .add_systems(
-                Startup,
-                (
-                    volume_spawn::spawn_volume_chunks,
-                    setup_voxel_material,
-                    authoring::seed_random_spheres_sdf,
-                )
-                    .chain(),
+            });
+
+        // Register diagnostics so iyes_perf_ui can render them
+        register_voxel_diagnostics(app);
+
+        app.add_systems(
+            Startup,
+            (
+                volume_spawn::spawn_volume_chunks,
+                setup_voxel_material,
+                authoring::seed_random_spheres_sdf,
             )
-            .add_systems(
-                Update,
-                (
-                    editing::apply_edit_events.in_set(VoxelSet::Editing),
-                    update_telemetry_begin
-                        .in_set(VoxelSet::Schedule)
-                        .before(drain_queue_and_spawn_jobs),
-                    drain_queue_and_spawn_jobs.in_set(VoxelSet::Schedule),
-                    pump_remesh_results.in_set(VoxelSet::Schedule),
-                    apply_remeshes.in_set(VoxelSet::ApplyMeshes),
-                ),
-            );
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                editing::apply_edit_events.in_set(VoxelSet::Editing),
+                update_telemetry_begin
+                    .in_set(VoxelSet::Schedule)
+                    .before(drain_queue_and_spawn_jobs),
+                drain_queue_and_spawn_jobs.in_set(VoxelSet::Schedule),
+                pump_remesh_results.in_set(VoxelSet::Schedule),
+                apply_remeshes.in_set(VoxelSet::ApplyMeshes),
+                publish_diagnostics.in_set(VoxelSet::ApplyMeshes),
+            ),
+        );
     }
 }
 

@@ -58,10 +58,18 @@ for arch in $ARCHS; do
       fi
   esac
 
-  cargo build $RELFLAG --target $TARGET --bin bevister
+  # Use LLVM-backed debug profile on hardware iOS to avoid Cranelift
+  CARGO_PROFILE_ARGS=
+  PROFILE_DIR=$PROFILE
+  if [[ -z "$RELFLAG" && "$TARGET" == "aarch64-apple-ios" ]]; then
+    CARGO_PROFILE_ARGS="--profile dev-llvm"
+    PROFILE_DIR="dev-llvm"
+  fi
+
+  cargo build $RELFLAG $CARGO_PROFILE_ARGS --target $TARGET --bin bevister
 
   # Collect the executables
-  EXECUTABLES="$EXECUTABLES $DERIVED_FILE_DIR/cargo/$TARGET/$PROFILE/bevister"
+  EXECUTABLES="$EXECUTABLES $DERIVED_FILE_DIR/cargo/$TARGET/$PROFILE_DIR/bevister"
 done
 
 # Combine executables, and place them at the output path excepted by Xcode

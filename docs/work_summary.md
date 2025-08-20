@@ -86,3 +86,9 @@
   - Moved `buffer_to_meshes_per_material` to `src/meshing/bevy_mesh.rs`; updated imports.
   - Extracted volume/chunk spawn to `src/plugin/volume_spawn.rs` and wired in startup.
   - Extracted random-spheres seeding to `src/authoring/seed.rs`; wired through `plugin` startup; factored `sample_min` as `pub(crate)` and used the `RemeshQueue` re-export.
+
+- Meshing telemetry and Perf UI (new):
+  - Added tracing spans in `scheduler.rs` (queue drain, job spawn, early skip, fsn run) and `apply_mesh.rs` (apply start, AABB compute, collider build). Uses Bevy’s re-exported tracing macros for Tracy/Chrome support [`bevy profiling docs`](https://github.com/bevyengine/bevy/blob/main/docs/profiling.md#tracy-renderqueue).
+  - Extended `VoxelTelemetry` with per-frame accumulators: `mesh_time_ms_frame`, `apply_time_ms_frame`, `jobs_spawned_frame`, `jobs_completed_frame`. Reset in `update_telemetry_begin`.
+  - Registered custom diagnostics and publish each frame: `vox.queue_len`, `vox.meshed_this_frame`, `vox.total_meshed`, `vox.jobs_spawned`, `vox.jobs_completed`, `vox.mesh_time_ms`, `vox.apply_time_ms`. `iyes_perf_ui` picks these up automatically (see minimal example for custom diagnostics publishing: [`iyes_perf_ui custom_minimal.rs`](https://github.com/IyesGames/iyes_perf_ui/blob/main/examples/custom_minimal.rs)).
+  - No behavioral changes to meshing or colliders.
