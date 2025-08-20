@@ -1,3 +1,4 @@
+pub mod authoring;
 pub mod core;
 pub mod meshing;
 pub mod plugin;

@@ -77,3 +77,12 @@
 - Module refactor (Step 1):
   - Extracted telemetry into `src/plugin/telemetry.rs` (`VoxelTelemetry`, `update_telemetry_begin`).
   - Updated `src/plugin/mod.rs` to use and re-export telemetry; behavior unchanged.
+
+- Module refactor (Steps 2–7):
+  - Extracted scheduler to `src/plugin/scheduler.rs` (`RemeshBudget`, `RemeshQueue`, `RemeshResultChannel`, `drain_queue_and_spawn_jobs`, `pump_remesh_results`).
+  - Extracted mesh application and collider build to `src/plugin/apply_mesh.rs`; preserved render AABB update and collider behavior.
+  - Extracted triplanar material setup to `src/plugin/materials.rs` (`TriplanarExtension`, `VoxelRenderMaterial`, `setup_voxel_material`); re-exported `TriplanarExtension` publicly for `main.rs` usage.
+  - Extracted editing to `src/plugin/editing.rs` (`EditOp`, `VoxelEditEvent`, `apply_edit_events`); re-exported types via `plugin`.
+  - Moved `buffer_to_meshes_per_material` to `src/meshing/bevy_mesh.rs`; updated imports.
+  - Extracted volume/chunk spawn to `src/plugin/volume_spawn.rs` and wired in startup.
+  - Extracted random-spheres seeding to `src/authoring/seed.rs`; wired through `plugin` startup; factored `sample_min` as `pub(crate)` and used the `RemeshQueue` re-export.

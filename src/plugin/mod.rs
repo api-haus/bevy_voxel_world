@@ -21,6 +21,10 @@ mod editing;
 mod materials;
 mod scheduler;
 mod telemetry;
+mod volume_spawn;
+mod authoring {
+    pub(crate) use crate::authoring::seed::seed_random_spheres_sdf;
+}
 use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
@@ -111,9 +115,9 @@ impl Plugin for VoxelPlugin {
             .add_systems(
                 Startup,
                 (
-                    spawn_volume_chunks,
+                    volume_spawn::spawn_volume_chunks,
                     setup_voxel_material,
-                    seed_random_spheres_sdf,
+                    authoring::seed_random_spheres_sdf,
                 )
                     .chain(),
             )
@@ -132,49 +136,9 @@ impl Plugin for VoxelPlugin {
     }
 }
 
-fn spawn_volume_chunks(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
-    let volume_entity = commands
-        .spawn((
-            Name::new("VoxelVolume"),
-            VoxelVolume {
-                chunk_core_dims: desc.chunk_core_dims,
-                grid_dims: desc.grid_dims,
-                origin_cell: desc.origin_cell,
-            },
-            Transform::default(),
-            GlobalTransform::default(),
-            Visibility::Visible,
-            InheritedVisibility::VISIBLE,
-            ViewVisibility::default(),
-        ))
-        .id();
+// spawn_volume_chunks moved to volume_spawn.rs
 
-    let grid = desc.grid_dims;
-    for z in 0..grid.z as i32 {
-        for y in 0..grid.y as i32 {
-            for x in 0..grid.x as i32 {
-                let chunk_coords = IVec3::new(x, y, z);
-                let storage = VoxelStorage::new(desc.chunk_core_dims);
-
-                let child = commands
-                    .spawn((
-                        Name::new(format!("VoxelChunk {:?}", chunk_coords)),
-                        VoxelChunk { chunk_coords },
-                        storage,
-                        Transform::default(),
-                        GlobalTransform::default(),
-                        Visibility::Visible,
-                        InheritedVisibility::VISIBLE,
-                        ViewVisibility::default(),
-                    ))
-                    .id();
-                commands.entity(volume_entity).add_child(child);
-            }
-        }
-    }
-}
-
-fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {
+pub(crate) fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {
     let core = desc.chunk_core_dims;
     let offset = IVec3::new(
         (core.x as i32) * chunk_coords.x,
@@ -184,137 +148,7 @@ fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {
     desc.origin_cell + offset - IVec3::ONE
 }
 
-fn seed_random_spheres_sdf(
-    desc: Res<VoxelVolumeDesc>,
-    mut queue: ResMut<RemeshQueue>,
-    mut q_chunks: Query<(Entity, &mut VoxelStorage, &VoxelChunk)>,
-) {
-    let mut rng: StdRng = SeedableRng::from_seed([7; 32]);
-
-    // Pre-generate a set of random spheres in world/sample space covering the whole volume
-    let vol_shape = IVec3::new(
-        (desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
-        (desc.grid_dims.y * desc.chunk_core_dims.y) as i32,
-        (desc.grid_dims.z * desc.chunk_core_dims.z) as i32,
-    );
-    let sphere_count = 400usize;
-    #[derive(Clone, Copy)]
-    struct Sphere {
-        center: IVec3,
-        radius: f32,
-        aabb_min: IVec3,
-        aabb_max: IVec3,
-    }
-    let spheres: Vec<Sphere> = (0..sphere_count)
-        .map(|_| {
-            let cx = rng.gen_range(0..vol_shape.x);
-            let cy = rng.gen_range(0..vol_shape.y);
-            let cz = rng.gen_range(0..vol_shape.z);
-            let r = rng.gen_range(2.0f32..16.0f32);
-            let center = IVec3::new(cx, cy, cz);
-            let rr = r.ceil() as i32 + 1;
-            let aabb_min = center - IVec3::splat(rr);
-            let aabb_max = center + IVec3::splat(rr);
-            Sphere {
-                center,
-                radius: r,
-                aabb_min,
-                aabb_max,
-            }
-        })
-        .collect();
-
-    // Collect chunk tasks to compute off-thread
-    #[derive(Clone, Copy)]
-    struct ChunkTask {
-        entity: Entity,
-        sample_min: IVec3,
-        sample_dims: UVec3,
-    }
-    let tasks: Vec<ChunkTask> = q_chunks
-        .iter_mut()
-        .map(|(e, storage, chunk)| {
-            let sample_min = sample_min(&desc, chunk.chunk_coords);
-            ChunkTask {
-                entity: e,
-                sample_min,
-                sample_dims: storage.dims.sample,
-            }
-        })
-        .collect();
-
-    // Compute SDF arrays per chunk in parallel, culling spheres by AABB
-    let results: Vec<(Entity, Vec<f32>)> = tasks
-        .par_iter()
-        .map(|task| {
-            let sx = task.sample_dims.x;
-            let sy = task.sample_dims.y;
-            let sz = task.sample_dims.z;
-            let len = (sx * sy * sz) as usize;
-            let mut sdf = vec![f32::INFINITY; len];
-
-            let chunk_min = task.sample_min;
-            let chunk_max = chunk_min + IVec3::new(sx as i32 - 1, sy as i32 - 1, sz as i32 - 1);
-
-            // Filter spheres that intersect this chunk's sample AABB
-            let intersecting: Vec<_> = spheres
-                .iter()
-                .filter(|s| {
-                    !(s.aabb_max.x < chunk_min.x
-                        || s.aabb_min.x > chunk_max.x
-                        || s.aabb_max.y < chunk_min.y
-                        || s.aabb_min.y > chunk_max.y
-                        || s.aabb_max.z < chunk_min.z
-                        || s.aabb_min.z > chunk_max.z)
-                })
-                .copied()
-                .collect();
-
-            if intersecting.is_empty() {
-                return (task.entity, sdf);
-            }
-
-            for z in 0..sz {
-                for y in 0..sy {
-                    for x in 0..sx {
-                        let p = IVec3::new(x as i32, y as i32, z as i32) + chunk_min;
-                        let idx = crate::core::index::linear_index(x, y, z, task.sample_dims);
-                        let mut dmin = sdf[idx];
-                        for s in &intersecting {
-                            // Optional per-voxel AABB skip
-                            if p.x < s.aabb_min.x
-                                || p.x > s.aabb_max.x
-                                || p.y < s.aabb_min.y
-                                || p.y > s.aabb_max.y
-                                || p.z < s.aabb_min.z
-                                || p.z > s.aabb_max.z
-                            {
-                                continue;
-                            }
-                            let dx = (p.x - s.center.x) as f32;
-                            let dy = (p.y - s.center.y) as f32;
-                            let dz = (p.z - s.center.z) as f32;
-                            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-                            dmin = dmin.min(dist - s.radius);
-                        }
-                        sdf[idx] = dmin;
-                    }
-                }
-            }
-
-            (task.entity, sdf)
-        })
-        .collect();
-
-    // Write results back to ECS storages and enqueue
-    for (entity, sdf) in results.into_iter() {
-        if let Ok((e, mut storage, _chunk)) = q_chunks.get_mut(entity) {
-            // Copy values
-            storage.sdf.copy_from_slice(&sdf);
-            queue.inner.push_back(e);
-        }
-    }
-}
+// seeding moved to authoring::seed
 
 // Editing systems moved to editing.rs
 

@@ -148,7 +148,7 @@ pub fn interact(
                     }
                     evw_dig.send(VoxelEditEvent {
                         center_world: hit_point,
-                        radius: 3.0,
+                        radius: 1.0,
                         op: EditOp::Destroy,
                     });
                 }
