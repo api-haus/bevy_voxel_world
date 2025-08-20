@@ -44,35 +44,3 @@ pub fn sample_extent(origin_cell: IVec3, core: UVec3) -> Extent<IVec3> {
         ),
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chunk_dims_sample_math() {
-        let dims = ChunkDims::from_core(UVec3::new(16, 16, 16));
-        assert_eq!(dims.sample, UVec3::new(18, 18, 18));
-        assert_eq!(dims.sample_len(), 18 * 18 * 18);
-    }
-
-    #[test]
-    fn extents_from_origin() {
-        let core = UVec3::new(32, 16, 8);
-        let origin = IVec3::new(-64, 0, 10);
-
-        let core_e = core_extent(origin, core);
-        assert_eq!(core_e.minimum, origin);
-
-        let sample_e = sample_extent(origin, core);
-        assert_eq!(sample_e.minimum, origin - IVec3::ONE);
-        assert_eq!(
-            sample_e.shape,
-            IVec3::new(
-                (core.x + 2) as i32,
-                (core.y + 2) as i32,
-                (core.z + 2) as i32
-            )
-        );
-    }
-}

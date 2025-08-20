@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{info_span, trace};
 
-use crate::voxels::storage::VoxelStorage;
+use crate::voxel_plugin::voxels::storage::VoxelStorage;
 
 // Budget for remeshing work per frame
 #[derive(Resource, Debug, Clone, Copy)]

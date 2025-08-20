@@ -1,12 +1,12 @@
-use rand::Rng;
 use bevy::prelude::*;
 use bevy_prng::*;
 use bevy_rand::global::GlobalEntropy;
 use ilattice::prelude::{IVec3, UVec3};
+use rand::Rng;
 use rayon::prelude::*;
 
 use crate::core::index::linear_index;
-use crate::voxels::storage::VoxelStorage;
+use crate::voxel_plugin::voxels::storage::VoxelStorage;
 
 /// Random sphere field seeding used in the demo. Behavior identical to the previous inline version.
 pub(crate) fn seed_random_spheres_sdf(
@@ -30,10 +30,10 @@ pub(crate) fn seed_random_spheres_sdf(
     }
     let spheres: Vec<Sphere> = (0..sphere_count)
         .map(|_| {
-            let cx = rng.gen_range(0..vol_shape.x);
-            let cy = rng.gen_range(0..vol_shape.y);
-            let cz = rng.gen_range(0..vol_shape.z);
-            let r = rng.gen_range(2.0f32..16.0f32);
+            let cx = rng.random_range(0..vol_shape.x);
+            let cy = rng.random_range(0..vol_shape.y);
+            let cz = rng.random_range(0..vol_shape.z);
+            let r = rng.random_range(2.0f32..16.0f32);
             let center = IVec3::new(cx, cy, cz);
             let rr = r.ceil() as i32 + 1;
             let aabb_min = center - IVec3::splat(rr);

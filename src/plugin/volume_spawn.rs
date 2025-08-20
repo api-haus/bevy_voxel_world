@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::voxels::storage::VoxelStorage;
+use crate::voxel_plugin::voxels::storage::VoxelStorage;
 
 pub(crate) fn spawn_volume_chunks(mut commands: Commands, desc: Res<super::VoxelVolumeDesc>) {
     let volume_entity = commands

@@ -1,6 +1,6 @@
 pub mod authoring;
 pub mod core;
+pub mod diag;
 pub mod ios_build;
-pub mod meshing;
 pub mod plugin;
-pub mod voxels;
+mod voxel_plugin;

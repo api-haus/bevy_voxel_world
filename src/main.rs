@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
 use avian3d::prelude::*;
+use bevister::diag::onscreen::OnScreenDiagPlugin;
+use bevister::diag::DiagPlugin;
 use bevister::plugin;
-use bevy::diagnostic;
 use bevy::log::{Level, LogPlugin};
 use bevy::pbr::{ExtendedMaterial, MaterialPlugin, StandardMaterial};
 use bevy::window::WindowMode;
@@ -10,10 +11,6 @@ use bevy_enhanced_input::prelude;
 use bevy_enhanced_input::prelude::InputContextAppExt;
 use bevy_prng::WyRand;
 use bevy_rand::plugin::EntropyPlugin;
-use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
-use diagnostic::{
-    EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-};
 use plugin::{TriplanarExtension, VoxelPlugin};
 use prelude::EnhancedInputPlugin;
 
@@ -23,9 +20,6 @@ mod fly_cam;
 fn main() {
     App::new()
         // we want Bevy to measure these values for us:
-        .add_plugins(FrameTimeDiagnosticsPlugin::default())
-        .add_plugins(EntityCountDiagnosticsPlugin)
-        .add_plugins(SystemInformationDiagnosticsPlugin)
         .add_plugins((
             DefaultPlugins
                 .set(LogPlugin {
@@ -49,16 +43,14 @@ fn main() {
                     }),
                     ..default()
                 }),
-            ScreenDiagnosticsPlugin::default(),
-            ScreenFrameDiagnosticsPlugin,
             PhysicsPlugins::default(),
             EnhancedInputPlugin,
             VoxelPlugin,
             EntropyPlugin::<WyRand>::default(),
+            DiagPlugin,
+            OnScreenDiagPlugin,
+            MaterialPlugin::<ExtendedMaterial<StandardMaterial, TriplanarExtension>>::default(),
         ))
-        .add_plugins(MaterialPlugin::<
-            ExtendedMaterial<StandardMaterial, TriplanarExtension>,
-        >::default())
         .add_input_context::<fly_cam::FlyCamCtx>()
         .add_systems(Startup, fly_cam::setup)
         .add_systems(

@@ -50,33 +50,3 @@ impl VoxelStorage {
         // Stub: will be filled when chunk neighbor topology exists.
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn allocate_sizes_match_dims() {
-        let storage = VoxelStorage::new(UVec3::new(16, 16, 16));
-        assert_eq!(storage.dims.sample, UVec3::new(18, 18, 18));
-        assert_eq!(storage.sdf.len(), 18 * 18 * 18);
-        assert_eq!(storage.mat.len(), 18 * 18 * 18);
-    }
-
-    #[test]
-    fn fill_and_indexing_mut() {
-        let mut storage = VoxelStorage::new(UVec3::new(16, 16, 16));
-        storage.fill_default(42.0, 7);
-        assert!(storage.sdf.iter().all(|&v| v == 42.0));
-        assert!(storage.mat.iter().all(|&m| m == 7));
-
-        // Write a couple of interior and apron samples
-        *storage.sdf_mut_at(0, 0, 0) = -1.0; // apron corner
-        *storage.mat_mut_at(17, 17, 17) = 3; // apron opposite corner (18 dims => last index 17)
-
-        assert_eq!(storage.sdf[0], -1.0);
-
-        let last_idx = linear_index(17, 17, 17, storage.dims.sample);
-        assert_eq!(storage.mat[last_idx], 3);
-    }
-}

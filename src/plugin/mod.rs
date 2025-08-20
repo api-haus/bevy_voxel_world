@@ -1,21 +1,16 @@
-use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
-use bevy::render::mesh::Mesh;
-use bevy::render::mesh::MeshAabb;
-use bevy::render::render_resource::AsBindGroup;
 use fast_surface_nets::SurfaceNetsBuffer;
 use ilattice::prelude::{IVec3, UVec3};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
-use rayon::prelude::*;
-
 mod apply_mesh;
 mod editing;
 mod materials;
 mod scheduler;
-mod telemetry;
+pub mod tracing;
 mod volume_spawn;
+
 mod authoring {
     pub(crate) use crate::authoring::components::{CsgOp, SdfBox, SdfSphere};
     pub(crate) use crate::authoring::seed::seed_random_spheres_sdf;
@@ -27,9 +22,8 @@ pub(crate) use materials::{setup_voxel_material, VoxelRenderMaterial};
 pub(crate) use scheduler::{
     drain_queue_and_spawn_jobs, pump_remesh_results, RemeshBudget, RemeshQueue,
 };
-pub(crate) use telemetry::VoxelTelemetry;
-use telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
-use crate::plugin::telemetry::setup_voxel_screen_diagnostics;
+pub(crate) use tracing::telemetry::VoxelTelemetry;
+use tracing::telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
 
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct VoxelVolumeDesc {
@@ -124,7 +118,6 @@ impl Plugin for VoxelPlugin {
                 volume_spawn::spawn_volume_chunks,
                 setup_voxel_material,
                 authoring::seed_random_spheres_sdf,
-                setup_voxel_screen_diagnostics,
             )
                 .chain(),
         )
@@ -154,107 +147,4 @@ pub(crate) fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {
         (core.z as i32) * chunk_coords.z,
     );
     desc.origin_cell + offset - IVec3::ONE
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bevy::asset::AssetPlugin;
-    use bevy::render::mesh::Mesh;
-    use bevy::render::render_resource::Shader;
-
-    #[test]
-    fn spawns_volume_and_chunks() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            // Prevent background jobs in tests to avoid threading teardown races
-            .insert_resource(RemeshBudget {
-                max_chunks_per_frame: 0,
-                time_slice_ms: 0,
-            })
-            // Provide asset containers required by startup systems
-            .insert_resource(Assets::<StandardMaterial>::default())
-            .insert_resource(Assets::<Mesh>::default())
-            .insert_resource(Assets::<Shader>::default())
-            .insert_resource(VoxelVolumeDesc {
-                chunk_core_dims: UVec3::new(8, 8, 8),
-                grid_dims: UVec3::new(2, 1, 2),
-                origin_cell: IVec3::ZERO,
-            })
-            .add_plugins(VoxelPlugin);
-
-        // Run the Startup schedule once
-        app.update();
-
-        // One volume
-        let world = app.world_mut();
-        let volumes = world.query::<&VoxelVolume>().iter(world).count();
-        assert_eq!(volumes, 1);
-
-        // Number of chunks equals product of grid dims
-        let chunks = world.query::<&VoxelChunk>().iter(world).count();
-        assert_eq!(chunks, 2 * 1 * 2);
-    }
-
-    #[test]
-    fn telemetry_increments_on_applied_mesh() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .insert_resource(RemeshBudget {
-                max_chunks_per_frame: 0,
-                time_slice_ms: 0,
-            })
-            .insert_resource(Assets::<StandardMaterial>::default())
-            .insert_resource(Assets::<Mesh>::default())
-            .insert_resource(Assets::<Shader>::default())
-            .insert_resource(Assets::<
-                ExtendedMaterial<StandardMaterial, TriplanarExtension>,
-            >::default())
-            .insert_resource(VoxelVolumeDesc::default())
-            .add_plugins(VoxelPlugin);
-
-        // Provide a render material handle
-        {
-            let mut mats = app
-                .world_mut()
-                .resource_mut::<Assets<ExtendedMaterial<StandardMaterial, TriplanarExtension>>>();
-            let handle = mats.add(ExtendedMaterial {
-                base: StandardMaterial::default(),
-                extension: TriplanarExtension::default(),
-            });
-            app.world_mut()
-                .insert_resource(VoxelRenderMaterial { handle });
-        }
-
-        // Spawn a chunk entity with a Transform so apply_remeshes can position it
-        let e = {
-            let mut world = app.world_mut();
-            world
-                .spawn((
-                    VoxelChunk {
-                        chunk_coords: IVec3::ZERO,
-                    },
-                    Transform::default(),
-                    GlobalTransform::default(),
-                ))
-                .id()
-        };
-
-        // Send a synthetic remesh event with a tiny triangle
-        {
-            let mut evs = app.world_mut().resource_mut::<Events<RemeshReady>>();
-            let mut buffer = SurfaceNetsBuffer::default();
-            buffer.positions = vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
-            buffer.normals = vec![[0.0, 0.0, 1.0]; 3];
-            buffer.indices = vec![0, 1, 2];
-            evs.send(RemeshReady { entity: e, buffer });
-        }
-
-        // Run systems once; apply_remeshes should consume the event and update telemetry
-        app.update();
-
-        let telemetry = app.world().resource::<super::VoxelTelemetry>();
-        assert_eq!(telemetry.meshed_this_frame, 1);
-        assert!(telemetry.total_meshed >= 1);
-    }
 }

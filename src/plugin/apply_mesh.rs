@@ -5,7 +5,7 @@ use bevy::render::mesh::MeshAabb;
 use std::time::Instant;
 use tracing::{info_span, trace};
 
-use crate::meshing::bevy_mesh::buffer_to_meshes_per_material;
+use crate::voxel_plugin::meshing::bevy_mesh::buffer_to_meshes_per_material;
 
 pub(crate) fn apply_remeshes(
     desc: Res<super::VoxelVolumeDesc>,
@@ -30,7 +30,7 @@ pub(crate) fn apply_remeshes(
         if meshes_vec.is_empty() {
             continue;
         }
-        let mut mesh = meshes_vec.into_iter().next().unwrap();
+        let mesh = meshes_vec.into_iter().next().unwrap();
         trace!("compute_aabb_begin");
         let _ = mesh.compute_aabb();
         let mesh_handle = meshes.add(mesh);
