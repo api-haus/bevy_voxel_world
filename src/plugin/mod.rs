@@ -17,9 +17,12 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
 
 mod apply_mesh;
+mod materials;
 mod scheduler;
 mod telemetry;
 use apply_mesh::apply_remeshes;
+pub use materials::TriplanarExtension;
+pub(crate) use materials::{VoxelRenderMaterial, setup_voxel_material};
 pub(crate) use scheduler::{
     RemeshBudget, RemeshQueue, RemeshResultChannel, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
@@ -178,63 +181,6 @@ fn spawn_volume_chunks(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
             }
         }
     }
-}
-
-#[derive(Resource, Clone)]
-struct VoxelRenderMaterial {
-    handle: Handle<ExtendedMaterial<StandardMaterial, TriplanarExtension>>,
-}
-
-#[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
-pub struct TriplanarExtension {
-    // Use binding slots starting at 100 to avoid collisions with StandardMaterial
-    #[texture(100)]
-    #[sampler(101)]
-    pub albedo_map: Option<Handle<Image>>,
-    #[uniform(102)]
-    pub tiling_scale: f32,
-}
-
-impl Default for TriplanarExtension {
-    fn default() -> Self {
-        Self {
-            albedo_map: None,
-            tiling_scale: 0.08,
-        }
-    }
-}
-
-impl MaterialExtension for TriplanarExtension {
-    fn fragment_shader() -> ShaderRef {
-        ShaderRef::Path("shaders/triplanar_pbr.wgsl".into())
-    }
-    fn deferred_fragment_shader() -> ShaderRef {
-        ShaderRef::Path("shaders/triplanar_pbr.wgsl".into())
-    }
-}
-
-fn setup_voxel_material(
-    mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, TriplanarExtension>>>,
-    asset_server: Res<AssetServer>,
-    mut commands: Commands,
-) {
-    // Load a default diffuse texture from the attached stylized textures pack
-    let albedo: Handle<Image> =
-        asset_server.load("free_stylized_textures/ground_01_1k/ground_01_color_1k.png");
-    let handle = materials.add(ExtendedMaterial {
-        base: StandardMaterial {
-            base_color: Color::WHITE,
-            base_color_texture: None,
-            perceptual_roughness: 0.8,
-            metallic: 0.0,
-            ..Default::default()
-        },
-        extension: TriplanarExtension {
-            albedo_map: Some(albedo),
-            tiling_scale: 0.08,
-        },
-    });
-    commands.insert_resource(VoxelRenderMaterial { handle });
 }
 
 fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {

@@ -8,7 +8,6 @@ use iyes_perf_ui::PerfUiPlugin;
 
 mod demo1;
 mod fly_cam;
-mod rayon_chunks;
 
 fn main() {
     App::new()
