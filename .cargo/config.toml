@@ -4,11 +4,6 @@ codegen-backend = true
 [profile.dev]
 codegen-backend = "cranelift"
 
-# Use LLVM instead of Cranelift for targets that require it (selected via --profile dev-llvm)
-[profile.dev-llvm]
-inherits = "dev"
-codegen-backend = "llvm"
-
 [profile.dev.package."*"]
 codegen-backend = "llvm"
 
@@ -17,3 +12,7 @@ rustflags = [
     # (Nightly) Make the current crate share its generic instantiations
     "-Zshare-generics=y",
 ]
+
+# It's recommended to set the flag on a per-target basis:
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

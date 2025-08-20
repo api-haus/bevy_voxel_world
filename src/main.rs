@@ -8,6 +8,8 @@ use bevy::pbr::{ExtendedMaterial, MaterialPlugin, StandardMaterial};
 use bevy::window::WindowMode;
 use bevy_enhanced_input::prelude;
 use bevy_enhanced_input::prelude::InputContextAppExt;
+use bevy_prng::WyRand;
+use bevy_rand::plugin::EntropyPlugin;
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 use diagnostic::{
     EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
@@ -52,6 +54,7 @@ fn main() {
             PhysicsPlugins::default(),
             EnhancedInputPlugin,
             VoxelPlugin,
+            EntropyPlugin::<WyRand>::default(),
         ))
         .add_plugins(MaterialPlugin::<
             ExtendedMaterial<StandardMaterial, TriplanarExtension>,

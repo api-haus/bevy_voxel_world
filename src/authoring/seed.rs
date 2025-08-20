@@ -1,6 +1,8 @@
+use rand::Rng;
 use bevy::prelude::*;
+use bevy_prng::*;
+use bevy_rand::global::GlobalEntropy;
 use ilattice::prelude::{IVec3, UVec3};
-use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 
 use crate::core::index::linear_index;
@@ -11,9 +13,8 @@ pub(crate) fn seed_random_spheres_sdf(
     desc: Res<crate::plugin::VoxelVolumeDesc>,
     mut queue: ResMut<crate::plugin::RemeshQueue>,
     mut q_chunks: Query<(Entity, &mut VoxelStorage, &crate::plugin::VoxelChunk)>,
+    mut rng: GlobalEntropy<WyRand>,
 ) {
-    let mut rng: StdRng = SeedableRng::from_seed([7; 32]);
-
     let vol_shape = IVec3::new(
         (desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
         (desc.grid_dims.y * desc.chunk_core_dims.y) as i32,

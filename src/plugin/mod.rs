@@ -8,7 +8,6 @@ use ilattice::prelude::{IVec3, UVec3};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
-use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
 mod apply_mesh;
@@ -19,10 +18,6 @@ mod telemetry;
 mod volume_spawn;
 mod authoring {
     pub(crate) use crate::authoring::components::{CsgOp, SdfBox, SdfSphere};
-    #[cfg(all(debug_assertions, feature = "editor"))]
-    pub(crate) use crate::authoring::scene_io::{
-        demo_spawn_authoring, save_authoring_scene_system,
-    };
     pub(crate) use crate::authoring::seed::seed_random_spheres_sdf;
 }
 use apply_mesh::apply_remeshes;
@@ -130,8 +125,6 @@ impl Plugin for VoxelPlugin {
                 setup_voxel_material,
                 authoring::seed_random_spheres_sdf,
                 setup_voxel_screen_diagnostics,
-                #[cfg(all(debug_assertions, feature = "editor"))]
-                authoring::demo_spawn_authoring,
             )
                 .chain(),
         )
@@ -146,8 +139,6 @@ impl Plugin for VoxelPlugin {
                 pump_remesh_results.in_set(VoxelSet::Schedule),
                 apply_remeshes.in_set(VoxelSet::ApplyMeshes),
                 publish_diagnostics.in_set(VoxelSet::ApplyMeshes),
-                #[cfg(all(debug_assertions, feature = "editor"))]
-                authoring::save_authoring_scene_system.in_set(VoxelSet::Authoring),
             ),
         );
     }
@@ -164,16 +155,6 @@ pub(crate) fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {
     );
     desc.origin_cell + offset - IVec3::ONE
 }
-
-// seeding moved to authoring::seed
-
-// Editing systems moved to editing.rs
-
-// scheduler::drain_queue_and_spawn_jobs and scheduler::pump_remesh_results moved to module
-
-// apply_mesh::apply_remeshes moved to module
-
-// Telemetry begin moved to telemetry::update_telemetry_begin
 
 #[cfg(test)]
 mod tests {
@@ -202,7 +183,7 @@ mod tests {
             })
             .add_plugins(VoxelPlugin);
 
-        // Run Startup schedule once
+        // Run the Startup schedule once
         app.update();
 
         // One volume
