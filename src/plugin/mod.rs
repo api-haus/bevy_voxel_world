@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::meshing::surface_nets::buffer_to_meshes_per_material;
+// buffer_to_meshes_per_material moved; plugin modules import from meshing::bevy_mesh directly
 use crate::voxels::storage::VoxelStorage;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;

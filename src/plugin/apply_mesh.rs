@@ -4,7 +4,7 @@ use bevy::render::mesh::Mesh;
 use bevy::render::mesh::MeshAabb;
 use fast_surface_nets::SurfaceNetsBuffer;
 
-use crate::meshing::surface_nets::buffer_to_meshes_per_material;
+use crate::meshing::bevy_mesh::buffer_to_meshes_per_material;
 
 pub(crate) fn apply_remeshes(
     desc: Res<super::VoxelVolumeDesc>,
