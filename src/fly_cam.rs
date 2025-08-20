@@ -61,8 +61,6 @@ pub struct SpawnBall;
 pub struct Place;
 
 pub fn setup(mut commands: Commands) {
-    commands.spawn(PerfUiAllEntries::default());
-
     commands.insert_resource(FlyCamTuning::default());
 
     commands.spawn((

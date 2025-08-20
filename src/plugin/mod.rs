@@ -114,7 +114,7 @@ impl Plugin for VoxelPlugin {
                 }
             });
 
-        // Register diagnostics so iyes_perf_ui can render them
+        // Register diagnostics and custom Perf UI entries
         register_voxel_diagnostics(app);
 
         app.add_systems(

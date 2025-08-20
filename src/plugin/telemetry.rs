@@ -1,9 +1,12 @@
 use bevy::diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic};
+use bevy::ecs::system::SystemParam;
+use bevy::ecs::system::lifetimeless::SRes;
 use bevy::prelude::*;
+use iyes_perf_ui::prelude::{PerfUiAppExt, PerfUiRoot};
 
 // Telemetry resource tracking meshing stats
 #[derive(Resource, Default, Debug, Clone, Copy)]
-pub(crate) struct VoxelTelemetry {
+pub struct VoxelTelemetry {
     pub(crate) total_meshed: u64,
     pub(crate) meshed_this_frame: u32,
     pub(crate) queue_len: usize,
@@ -43,13 +46,13 @@ pub(crate) const DIAG_VOX_APPLY_TIME_MS: DiagnosticPath =
 
 // Register our diagnostics so iyes_perf_ui can display them
 pub(crate) fn register_voxel_diagnostics(app: &mut App) {
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_QUEUE_LEN));
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_MESHED_THIS_FRAME));
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_TOTAL_MESHED));
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_JOBS_SPAWNED));
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_JOBS_COMPLETED));
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_MESH_TIME_MS));
-    app.register_diagnostic(Diagnostic::new(DIAG_VOX_APPLY_TIME_MS));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_QUEUE_LEN).with_suffix(" items"));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_MESHED_THIS_FRAME).with_suffix(" chunks"));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_TOTAL_MESHED).with_suffix(" chunks"));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_JOBS_SPAWNED).with_suffix(" jobs"));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_JOBS_COMPLETED).with_suffix(" jobs"));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_MESH_TIME_MS).with_suffix(" ms"));
+    app.register_diagnostic(Diagnostic::new(DIAG_VOX_APPLY_TIME_MS).with_suffix(" ms"));
 }
 
 // Publish the current telemetry to Bevy Diagnostics each frame
