@@ -17,10 +17,12 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
 
 mod apply_mesh;
+mod editing;
 mod materials;
 mod scheduler;
 mod telemetry;
 use apply_mesh::apply_remeshes;
+pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
 pub(crate) use materials::{VoxelRenderMaterial, setup_voxel_material};
 pub(crate) use scheduler::{
@@ -58,18 +60,7 @@ pub struct VoxelChunk {
     pub chunk_coords: IVec3,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum EditOp {
-    Destroy,
-    Place,
-}
-
-#[derive(Event, Clone, Copy, Debug)]
-pub struct VoxelEditEvent {
-    pub center_world: Vec3,
-    pub radius: f32,
-    pub op: EditOp,
-}
+// Editing types moved to editing.rs
 
 #[derive(Event)]
 pub struct RemeshReady {
@@ -129,7 +120,7 @@ impl Plugin for VoxelPlugin {
             .add_systems(
                 Update,
                 (
-                    apply_edit_events.in_set(VoxelSet::Editing),
+                    editing::apply_edit_events.in_set(VoxelSet::Editing),
                     update_telemetry_begin
                         .in_set(VoxelSet::Schedule)
                         .before(drain_queue_and_spawn_jobs),
@@ -325,77 +316,7 @@ fn seed_random_spheres_sdf(
     }
 }
 
-fn sphere_aabb_intersects(center: Vec3, radius: f32, min: IVec3, max: IVec3) -> bool {
-    let mut d2 = 0.0f32;
-    let c = center;
-    let clamp = |v: f32, lo: f32, hi: f32| v.max(lo).min(hi);
-    let px = clamp(c.x, min.x as f32, max.x as f32);
-    let py = clamp(c.y, min.y as f32, max.y as f32);
-    let pz = clamp(c.z, min.z as f32, max.z as f32);
-    d2 += (c.x - px) * (c.x - px);
-    d2 += (c.y - py) * (c.y - py);
-    d2 += (c.z - pz) * (c.z - pz);
-    d2 <= radius * radius
-}
-
-fn apply_edit_events(
-    desc: Res<VoxelVolumeDesc>,
-    mut queue: ResMut<RemeshQueue>,
-    mut evr: EventReader<VoxelEditEvent>,
-    mut q_chunks: Query<(Entity, &mut VoxelStorage, &VoxelChunk)>,
-) {
-    for ev in evr.read() {
-        let center = ev.center_world;
-        let radius = ev.radius;
-        for (entity, mut storage, chunk) in q_chunks.iter_mut() {
-            let s = storage.dims.sample;
-            let min = sample_min(&desc, chunk.chunk_coords);
-            let max = min + IVec3::new(s.x as i32 - 1, s.y as i32 - 1, s.z as i32 - 1);
-            if !sphere_aabb_intersects(center, radius, min, max) {
-                continue;
-            }
-            let mut changed = false;
-            for z in 0..s.z {
-                for y in 0..s.y {
-                    for x in 0..s.x {
-                        let p = Vec3::new(
-                            (min.x + x as i32) as f32,
-                            (min.y + y as i32) as f32,
-                            (min.z + z as i32) as f32,
-                        );
-                        let b = p.distance(center) - radius; // sphere SDF (negative inside)
-                        let idx = crate::core::index::linear_index(x, y, z, s);
-                        let s_old = storage.sdf[idx];
-                        let s_new = match ev.op {
-                            EditOp::Destroy => s_old.max(-b),
-                            EditOp::Place => s_old.min(b),
-                        };
-                        if s_new != s_old {
-                            match ev.op {
-                                EditOp::Destroy => {
-                                    if s_old < 0.0 && s_new >= 0.0 {
-                                        storage.mat[idx] = crate::voxels::storage::AIR_ID;
-                                    }
-                                }
-                                EditOp::Place => {
-                                    if s_old >= 0.0 && s_new < 0.0 {
-                                        // TODO: select material; default 1 for now
-                                        storage.mat[idx] = 1;
-                                    }
-                                }
-                            }
-                            storage.sdf[idx] = s_new;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-            if changed {
-                queue.inner.push_back(entity);
-            }
-        }
-    }
-}
+// Editing systems moved to editing.rs
 
 // scheduler::drain_queue_and_spawn_jobs and scheduler::pump_remesh_results moved to module
 
