@@ -12,7 +12,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		55EAC02897847195D2F44C15 /* bevy_mobile_example.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = bevy_mobile_example.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		55EAC02897847195D2F44C15 /* bevister.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = bevister.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		57CD630A253C7F5F0098CD4A /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = ../../../assets; sourceTree = "<group>"; };
 		6ADF1AB82CCDA73A00AF5F8E /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		8EE7F1E3B0303533925D7E33 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -22,7 +22,7 @@
 		321F7D6A765B38E746C35105 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				55EAC02897847195D2F44C15 /* bevy_mobile_example.app */,
+				55EAC02897847195D2F44C15 /* bevister.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -55,9 +55,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		3BDB8152E4962373181B4FE5 /* bevy_mobile_example */ = {
+		3BDB8152E4962373181B4FE5 /* bevister */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = E714A1AEAAE517C348B5BD27 /* Build configuration list for PBXNativeTarget "bevy_mobile_example" */;
+			buildConfigurationList = E714A1AEAAE517C348B5BD27 /* Build configuration list for PBXNativeTarget "bevister" */;
 			buildPhases = (
 				ECFC92D02C6F14FA0095E5B1 /* Rust */,
 				57CD630D253C80E60098CD4A /* Resources */,
@@ -66,9 +66,9 @@
 			);
 			dependencies = (
 			);
-			name = bevy_mobile_example;
-			productName = bevy_mobile_example;
-			productReference = 55EAC02897847195D2F44C15 /* bevy_mobile_example.app */;
+			name = bevister;
+			productName = bevister;
+			productReference = 55EAC02897847195D2F44C15 /* bevister.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -79,7 +79,7 @@
 			attributes = {
 				LastUpgradeCheck = 1240;
 			};
-			buildConfigurationList = 9D43D41707A5C30B227B83F9 /* Build configuration list for PBXProject "bevy_mobile_example" */;
+			buildConfigurationList = 9D43D41707A5C30B227B83F9 /* Build configuration list for PBXProject "bevister" */;
 			compatibilityVersion = "Xcode 10.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -90,7 +90,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				3BDB8152E4962373181B4FE5 /* bevy_mobile_example */,
+				3BDB8152E4962373181B4FE5 /* bevister */,
 			);
 		};
 /* End PBXProject section */
@@ -282,7 +282,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		9D43D41707A5C30B227B83F9 /* Build configuration list for PBXProject "bevy_mobile_example" */ = {
+		9D43D41707A5C30B227B83F9 /* Build configuration list for PBXProject "bevister" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				4AD7BC6FDD56FF18FA6DA7D7 /* Debug */,
@@ -291,7 +291,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		E714A1AEAAE517C348B5BD27 /* Build configuration list for PBXNativeTarget "bevy_mobile_example" */ = {
+		E714A1AEAAE517C348B5BD27 /* Build configuration list for PBXNativeTarget "bevister" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A2D5B73DD30D562B6F366526 /* Debug */,

@@ -73,3 +73,7 @@
  - How to run/verify (updated):
    - `cargo test` remains green, including meshing tests.
    - `cargo run --features bevy/dynamic_linking` spawns the `16×16×16` volume seeded with random spheres. Use E/R to dig/place at the crosshair and F to spawn a ball; meshes and colliders update immediately and cull correctly.
+
+- Module refactor (Step 1):
+  - Extracted telemetry into `src/plugin/telemetry.rs` (`VoxelTelemetry`, `update_telemetry_begin`).
+  - Updated `src/plugin/mod.rs` to use and re-export telemetry; behavior unchanged.

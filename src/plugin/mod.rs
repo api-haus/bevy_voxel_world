@@ -16,6 +16,16 @@ use crate::voxels::storage::VoxelStorage;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
 
+mod apply_mesh;
+mod scheduler;
+mod telemetry;
+use apply_mesh::apply_remeshes;
+pub(crate) use scheduler::{
+    RemeshBudget, RemeshQueue, RemeshResultChannel, drain_queue_and_spawn_jobs, pump_remesh_results,
+};
+pub(crate) use telemetry::VoxelTelemetry;
+use telemetry::update_telemetry_begin;
+
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct VoxelVolumeDesc {
     pub chunk_core_dims: UVec3,
@@ -64,38 +74,9 @@ pub struct RemeshReady {
     pub buffer: SurfaceNetsBuffer,
 }
 
-#[derive(Resource, Debug, Clone, Copy)]
-pub struct RemeshBudget {
-    pub max_chunks_per_frame: usize,
-    pub time_slice_ms: u64,
-}
+// Scheduler types moved to `scheduler.rs`
 
-impl Default for RemeshBudget {
-    fn default() -> Self {
-        Self {
-            max_chunks_per_frame: 4,
-            time_slice_ms: 2,
-        }
-    }
-}
-
-#[derive(Resource, Default)]
-struct RemeshQueue {
-    inner: VecDeque<Entity>,
-}
-
-#[derive(Resource)]
-struct RemeshResultChannel {
-    tx: Sender<RemeshReady>,
-    rx: Arc<Mutex<Receiver<RemeshReady>>>,
-}
-
-#[derive(Resource, Default, Debug, Clone, Copy)]
-struct VoxelTelemetry {
-    total_meshed: u64,
-    meshed_this_frame: u32,
-    queue_len: usize,
-}
+// Telemetry moved to `telemetry.rs`
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum VoxelSet {
@@ -128,7 +109,7 @@ impl Plugin for VoxelPlugin {
             )
             .insert_resource({
                 let (tx, rx) = channel();
-                RemeshResultChannel {
+                scheduler::RemeshResultChannel {
                     tx,
                     rx: Arc::new(Mutex::new(rx)),
                 }
@@ -470,136 +451,11 @@ fn apply_edit_events(
     }
 }
 
-fn drain_queue_and_spawn_jobs(
-    budget: Res<RemeshBudget>,
-    mut queue: ResMut<RemeshQueue>,
-    channels: Res<RemeshResultChannel>,
-    q_storage: Query<&VoxelStorage>,
-) {
-    let start = Instant::now();
-    let time_slice = Duration::from_millis(budget.time_slice_ms);
+// scheduler::drain_queue_and_spawn_jobs and scheduler::pump_remesh_results moved to module
 
-    let mut processed = 0usize;
-    while processed < budget.max_chunks_per_frame && start.elapsed() <= time_slice {
-        let Some(entity) = queue.inner.pop_front() else {
-            break;
-        };
-        processed += 1;
+// apply_mesh::apply_remeshes moved to module
 
-        let Ok(storage) = q_storage.get(entity) else {
-            continue;
-        };
-        let s = storage.dims.sample;
-        if !(s.x == 18 && s.y == 18 && s.z == 18) {
-            continue;
-        }
-
-        // Copy SDF to move into the rayon task
-        let sdf: Vec<f32> = storage.sdf.iter().copied().collect();
-        let tx = channels.tx.clone();
-
-        rayon::spawn(move || {
-            // Early skip
-            let mut any_pos = false;
-            let mut any_neg = false;
-            for &v in &sdf {
-                if v <= 0.0 {
-                    any_neg = true;
-                } else {
-                    any_pos = true;
-                }
-                if any_pos && any_neg {
-                    break;
-                }
-            }
-            if !(any_pos && any_neg) {
-                return;
-            }
-
-            let mut buffer = SurfaceNetsBuffer::default();
-            fast_surface_nets::surface_nets(
-                &sdf,
-                &fast_surface_nets::ndshape::ConstShape3u32::<18, 18, 18>,
-                [0; 3],
-                [17, 17, 17],
-                &mut buffer,
-            );
-
-            if buffer.positions.is_empty() {
-                return;
-            }
-
-            let _ = tx.send(RemeshReady { entity, buffer });
-        });
-    }
-}
-
-fn pump_remesh_results(channels: Res<RemeshResultChannel>, mut evw: EventWriter<RemeshReady>) {
-    loop {
-        let Ok(guard) = channels.rx.lock() else { break };
-        match guard.try_recv() {
-            Ok(result) => {
-                drop(guard);
-                evw.write(result);
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => break,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-        }
-    }
-}
-
-fn apply_remeshes(
-    desc: Res<VoxelVolumeDesc>,
-    render_mat: Res<VoxelRenderMaterial>,
-    mut telemetry: ResMut<VoxelTelemetry>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut commands: Commands,
-    mut evr: EventReader<RemeshReady>,
-    mut q_chunk_tf: Query<(&VoxelChunk, &mut Transform)>,
-) {
-    for ev in evr.read() {
-        // Build mesh(es) (single material for now)
-        let meshes_vec = buffer_to_meshes_per_material(&ev.buffer, None);
-        if meshes_vec.is_empty() {
-            continue;
-        }
-        let mut mesh = meshes_vec.into_iter().next().unwrap();
-        // Ensure render bounds are updated to the new geometry
-        if mesh.compute_aabb().is_some() {
-            // no-op: compute_aabb updates internal cached aabb on insert in visibility systems
-        }
-        let mesh_handle = meshes.add(mesh);
-        let mesh_id = mesh_handle.id();
-
-        if let Ok((chunk, mut transform)) = q_chunk_tf.get_mut(ev.entity) {
-            // Position the chunk by its sample min in volume-local space
-            let min = sample_min(&desc, chunk.chunk_coords);
-            transform.translation = Vec3::new(min.x as f32, min.y as f32, min.z as f32);
-
-            commands.entity(ev.entity).insert((
-                Mesh3d(mesh_handle.clone()),
-                MeshMaterial3d(render_mat.handle.clone()),
-            ));
-
-            // Build/replace a static triangle-mesh collider from the render mesh
-            if let Some(mesh_ref) = meshes.get(mesh_id) {
-                #[allow(clippy::unnecessary_unwrap)]
-                if let Some(collider) = Collider::trimesh_from_mesh(mesh_ref) {
-                    commands
-                        .entity(ev.entity)
-                        .insert((RigidBody::Static, collider));
-                }
-            }
-            telemetry.total_meshed += 1;
-            telemetry.meshed_this_frame += 1;
-        }
-    }
-}
-
-fn update_telemetry_begin(queue: Res<RemeshQueue>, mut telemetry: ResMut<VoxelTelemetry>) {
-    telemetry.meshed_this_frame = 0;
-    telemetry.queue_len = queue.inner.len();
-}
+// Telemetry begin moved to telemetry::update_telemetry_begin
 
 #[cfg(test)]
 mod tests {
