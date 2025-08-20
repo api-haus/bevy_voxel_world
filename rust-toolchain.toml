@@ -1,2 +1,10 @@
 [toolchain]
-channel = "nightly-2025-08-02"
+channel = "1.89.0"
+components = ["rustfmt", "clippy", "rust-analyzer", "rustc-codegen-cranelift"]
+targets = [
+    "wasm32-unknown-unknown",
+    "aarch64-apple-darwin",
+    "aarch64-apple-ios",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-gnu"
+]
