@@ -66,7 +66,7 @@ for arch in $ARCHS; do
     PROFILE_DIR="dev-llvm"
   fi
 
-  cargo build $RELFLAG $CARGO_PROFILE_ARGS --target $TARGET --bin bevister
+  cargo build $RELFLAG $CARGO_PROFILE_ARGS --features ios --target $TARGET --bin bevister
 
   # Collect the executables
   EXECUTABLES="$EXECUTABLES $DERIVED_FILE_DIR/cargo/$TARGET/$PROFILE_DIR/bevister"

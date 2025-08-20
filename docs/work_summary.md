@@ -92,3 +92,8 @@
   - Extended `VoxelTelemetry` with per-frame accumulators: `mesh_time_ms_frame`, `apply_time_ms_frame`, `jobs_spawned_frame`, `jobs_completed_frame`. Reset in `update_telemetry_begin`.
   - Registered custom diagnostics and publish each frame: `vox.queue_len`, `vox.meshed_this_frame`, `vox.total_meshed`, `vox.jobs_spawned`, `vox.jobs_completed`, `vox.mesh_time_ms`, `vox.apply_time_ms`. `iyes_perf_ui` picks these up automatically (see minimal example for custom diagnostics publishing: [`iyes_perf_ui custom_minimal.rs`](https://github.com/IyesGames/iyes_perf_ui/blob/main/examples/custom_minimal.rs)).
   - No behavioral changes to meshing or colliders.
+
+- Authoring direction (change in plan):
+  - Pivot to visual scene authoring via an editor-mode workflow (Yoleck-like) instead of ad-hoc `DynamicScene`/RON saves. Authoring entities (procedural shapes and mesh providers) will be edited in the visual editor and serialized using the editor’s scene format.
+  - Baking remains the source of truth at runtime: scenes are voxelized into a binary baked format (dense SoA per chunk) and loaded from disk to populate voxels. No RON `.scn.ron` saves are required.
+  - Next steps: integrate an editor plugin (e.g., Yoleck-style) for in-app authoring; define a one-shot/editor-mode bake pipeline that converts the current edited scene to the `.vxb` chunk files described in the spec; hook up hot-reload of bakes in dev.

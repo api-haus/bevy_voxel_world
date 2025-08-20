@@ -2,7 +2,6 @@ use avian3d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
 use bevy::render::mesh::Mesh;
 use bevy::render::mesh::MeshAabb;
-use fast_surface_nets::SurfaceNetsBuffer;
 use std::time::Instant;
 use tracing::{info_span, trace};
 

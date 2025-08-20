@@ -1,19 +1,14 @@
-use avian3d::prelude::{Collider, RigidBody};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
 use bevy::render::mesh::Mesh;
 use bevy::render::mesh::MeshAabb;
-use bevy::render::render_resource::{AsBindGroup, ShaderRef};
+use bevy::render::render_resource::AsBindGroup;
 use fast_surface_nets::SurfaceNetsBuffer;
 use ilattice::prelude::{IVec3, UVec3};
-use std::collections::VecDeque;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
-// buffer_to_meshes_per_material moved; plugin modules import from meshing::bevy_mesh directly
-use crate::voxels::storage::VoxelStorage;
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 
 mod apply_mesh;
@@ -23,17 +18,23 @@ mod scheduler;
 mod telemetry;
 mod volume_spawn;
 mod authoring {
+    pub(crate) use crate::authoring::components::{CsgOp, SdfBox, SdfSphere};
+    #[cfg(all(debug_assertions, feature = "editor"))]
+    pub(crate) use crate::authoring::scene_io::{
+        demo_spawn_authoring, save_authoring_scene_system,
+    };
     pub(crate) use crate::authoring::seed::seed_random_spheres_sdf;
 }
 use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
-pub(crate) use materials::{VoxelRenderMaterial, setup_voxel_material};
+pub(crate) use materials::{setup_voxel_material, VoxelRenderMaterial};
 pub(crate) use scheduler::{
-    RemeshBudget, RemeshQueue, RemeshResultChannel, drain_queue_and_spawn_jobs, pump_remesh_results,
+    drain_queue_and_spawn_jobs, pump_remesh_results, RemeshBudget, RemeshQueue,
 };
 pub(crate) use telemetry::VoxelTelemetry;
 use telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
+use crate::plugin::telemetry::setup_voxel_screen_diagnostics;
 
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct VoxelVolumeDesc {
@@ -117,12 +118,20 @@ impl Plugin for VoxelPlugin {
         // Register diagnostics and custom Perf UI entries
         register_voxel_diagnostics(app);
 
+        // Register authoring reflection types for scene I/O
+        app.register_type::<authoring::CsgOp>()
+            .register_type::<authoring::SdfSphere>()
+            .register_type::<authoring::SdfBox>();
+
         app.add_systems(
             Startup,
             (
                 volume_spawn::spawn_volume_chunks,
                 setup_voxel_material,
                 authoring::seed_random_spheres_sdf,
+                setup_voxel_screen_diagnostics,
+                #[cfg(all(debug_assertions, feature = "editor"))]
+                authoring::demo_spawn_authoring,
             )
                 .chain(),
         )
@@ -137,6 +146,8 @@ impl Plugin for VoxelPlugin {
                 pump_remesh_results.in_set(VoxelSet::Schedule),
                 apply_remeshes.in_set(VoxelSet::ApplyMeshes),
                 publish_diagnostics.in_set(VoxelSet::ApplyMeshes),
+                #[cfg(all(debug_assertions, feature = "editor"))]
+                authoring::save_authoring_scene_system.in_set(VoxelSet::Authoring),
             ),
         );
     }

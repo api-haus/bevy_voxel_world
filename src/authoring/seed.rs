@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use ilattice::prelude::{IVec3, UVec3};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 
 use crate::core::index::linear_index;

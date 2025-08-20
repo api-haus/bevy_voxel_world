@@ -5,7 +5,7 @@
 - Voxel storage (SoA + apron)
 - Meshing (fast_surface_nets) and buffer → Bevy Mesh
 - Bevy ECS plugin scaffolding (volumes/chunks as entities)
-- Authoring (SDF shapes + mesh_to_sdf) and baking I/O
+- Authoring (editor build: SDF shapes + mesh_to_sdf) and baking I/O
 - Runtime editing (brush ops) and dirty → remesh mapping
 - Remesh scheduler (budgets, prioritization, Rayon)
 - Physics colliders (avian3d) and debounce
@@ -75,14 +75,16 @@
 - Acceptance
   - Example scene spawns volumes/chunks; systems run without panics.
 
-### Authoring (SDF shapes + mesh_to_sdf) and baking I/O
+### Authoring (visual editor build + SDF shapes/mesh_to_sdf) and baking I/O
 - Scope
-  - ECS shape components; CSG ops; voxelization; bake read/write.
+  - Visual editor workflow (Yoleck-like): in-app editing of authoring components, scene persistence via the editor’s format; no RON scene path. Editor features are compiled only in the developer/editor build, not in shipping builds.
+  - Voxelization; bake read/write.
 - Deliverables
   - Shapes: sphere, box, cone; ops: union/intersect/subtract (+ smooth k).
   - Mesh-SDF provider: narrow band ±3 voxels; sign policy (winding default; flood-fill fallback).
   - Bake format: header + LZ4 body; optional CRC32; per-volume directory structure.
 - Tasks
+  - Integrate editor-mode plugin to allow creating/editing authoring entities in-app.
   - Per-chunk voxelization: cull contributors by AABB+apron; compose SDF/material per sample.
   - Material rule: choose contributor with smallest |s|; tie by priority else last-writer.
   - `write_vxb/read_vxb`; file watcher for hot-reload (dev only).
@@ -244,5 +246,4 @@
 
 ## Out-of-scope (v1)
 - LOD, streaming, sparse compression, GPU meshing, non-uniform scale.
-
-
+- Editor in shipping builds; Android/WebGL/WASM/other platforms (focus on Windows/Linux/macOS/iOS only).

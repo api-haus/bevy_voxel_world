@@ -1,7 +1,7 @@
 use crate::voxels::storage::VoxelStorage;
 use bevy::prelude::Vec3;
 use fast_surface_nets::ndshape::ConstShape3u32;
-use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 
 /// A simple wrapper that runs Surface Nets on fixed chunk sizes.
 /// Returns `None` if the chunk is entirely positive or entirely negative, including apron.

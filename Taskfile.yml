@@ -7,83 +7,24 @@ dotenv:
 tasks:
   default:
     desc: Run on connected iOS device by default
-    deps: [device]
-
-  simulator:
-    desc: Boot, build, install, and run on iOS simulator
-    vars:
-      DEVICE:
-        sh: |
-          if [ -n "$DEVICE_ID" ]; then
-            echo "$DEVICE_ID"
-          else
-            xcrun simctl list devices 'iOS' | grep -v 'unavailable' | grep -v '^--' | grep -v '==' | head -n 1 | grep -E -o -i "([0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12})"
-          fi
-    cmds:
-      - xcrun simctl boot {{.DEVICE}} || true
-      - IOS_TARGETS=x86_64-apple-ios xcodebuild -scheme bevister -configuration Debug -derivedDataPath build -destination "id={{.DEVICE}}"
-      - xcrun simctl install {{.DEVICE}} build/Build/Products/Debug-iphonesimulator/bevister.app
-      - |
-        bash -lc '
-          set -euo pipefail
-          xcrun simctl spawn {{.DEVICE}} log stream --style compact --process bevister & LOG_PID=$!
-          APP_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/Build/Products/Debug-iphonesimulator/bevister.app/Info.plist" 2>/dev/null || echo "${BUNDLE_ID:-org.bevyengine.example}")"
-          xcrun simctl launch --console {{.DEVICE}} "$APP_BUNDLE_ID"
-          kill $LOG_PID 2>/dev/null || true
-        '
+    deps: [ device ]
 
   device:
     desc: Build, install, and run on connected iOS device
-    vars:
-      IOS_DEVICE:
-        sh: |
-          if [ -n "$DEVICE_ID" ]; then
-            echo "$DEVICE_ID"
-          elif [ -n "$IOS_DEVICE_ID" ]; then
-            echo "$IOS_DEVICE_ID"
-          else
-            xcrun xcdevice list --timeout 2 --json 2>/dev/null | python3 -c 'import sys,json; data=json.load(sys.stdin); print(next((d.get("identifier","") for d in data if not d.get("simulator") and d.get("available") and d.get("platform")=="iOS"), ""), end="")'
-          fi
-    preconditions:
-      - sh: test -n "{{.IOS_DEVICE}}"
-        msg: "No iOS device UDID found. Provide with IOS_DEVICE_ID=<udid> or DEVICE_ID=<udid>."
     cmds:
-      - IOS_TARGETS=aarch64-apple-ios xcodebuild -scheme bevister -configuration Debug -derivedDataPath build -destination 'generic/platform=iOS' DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_STYLE="${CODE_SIGN_STYLE:-Automatic}" CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Apple Development}" PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER" -allowProvisioningUpdates -allowProvisioningDeviceRegistration
-      - xcrun devicectl device install app --device {{.IOS_DEVICE}} build/Build/Products/Debug-iphoneos/bevister.app
-      - |
-        bash -lc '
-          set -euo pipefail
-          LOG_DIR="build/device-logs/$(date +%Y%m%d-%H%M%S)"
-          mkdir -p "$LOG_DIR"
-          LOG_FILE="$LOG_DIR/device.log"
-          LOG_PID=""
-          if command -v idevicesyslog >/dev/null 2>&1; then
-            idevicesyslog -u {{.IOS_DEVICE}} > "$LOG_FILE" 2>&1 & LOG_PID=$!
-          else
-            echo "idevicesyslog not found; install with: brew install libimobiledevice" >&2
-            : > "$LOG_FILE" || true
-          fi
-          APP_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "build/Build/Products/Debug-iphoneos/bevister.app/Info.plist" 2>/dev/null || echo "${BUNDLE_ID:-org.bevyengine.example}")"
-          APP_EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "build/Build/Products/Debug-iphoneos/bevister.app/Info.plist" 2>/dev/null || echo "bevister")"
-          export DEVICECTL_CHILD_RUST_BACKTRACE=1
-          export DEVICECTL_CHILD_RUST_LOG=debug
-          xcrun devicectl device process launch --terminate-existing --device {{.IOS_DEVICE}} "$APP_BUNDLE_ID" --console || true
-          # give logger a moment to flush if we crashed fast
-          sleep 2 || true
-          if [ -n "${LOG_PID:-}" ]; then kill $LOG_PID 2>/dev/null || true; fi
-          echo "Saved device logs to $LOG_FILE" >&2
-          if [ -s "$LOG_FILE" ]; then tail -n 200 "$LOG_FILE" || true; fi
-          # Try to copy the most recent crash report for this app
-          set +e
-          LATEST_CRASH=$(xcrun devicectl device info files --device {{.IOS_DEVICE}} --domain-type systemCrashLogs --filter "Name BEGINSWITH '$APP_EXECUTABLE_NAME-' AND Name ENDSWITH '.ips'" --sort-by "Modification date" --hide-headers --columns Name 2>/dev/null | tail -n 1 | tr -d '\r')
-          if [ -n "$LATEST_CRASH" ]; then
-            xcrun devicectl device copy from --device {{.IOS_DEVICE}} --domain-type systemCrashLogs --source "$LATEST_CRASH" --destination "$LOG_DIR/" 2>/dev/null || true
-            echo "Copied crash report: $LOG_DIR/$LATEST_CRASH" >&2
-            # print a short preview
-            head -n 80 "$LOG_DIR/$LATEST_CRASH" 2>/dev/null || true
-          fi
-          set -e
-        '
+      - IOS_TARGETS=aarch64-apple-ios
+        xcodebuild
+        -scheme bevister
+        -configuration Debug
+        -derivedDataPath build
+        -destination 'generic/platform=iOS'
+        DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
+        CODE_SIGN_STYLE="${CODE_SIGN_STYLE:-Automatic}"
+        CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Apple Development}"
+        PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER"
+        -allowProvisioningUpdates
+        -allowProvisioningDeviceRegistration &&
+        bash ./ios-src/open_xcode_and_build.sh
 
   clean:
     desc: Clean build artifacts

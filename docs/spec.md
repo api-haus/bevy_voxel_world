@@ -3,6 +3,8 @@
 ### Overview & Goals / Non-Goals
 - **Goal**: CPU Surface Nets meshing for destructible, grid-based voxels across many independent volumes. Dense SoA voxel storage per chunk. Runtime edits, baking, PBR rendering, physics colliders.
 - **Non-goals (v1)**: LOD, streaming, persistence beyond bake/load, GPU meshing, non-uniform scale support.
+- **Platforms (production)**: Windows, Linux, macOS, iOS.
+- **Editor access**: Scene editing is developer-only in a separate editor build. Shipping builds do not include editor UIs or authoring systems.
 
 ### Terminology & Coordinate Conventions
 - **Volume space**: Local coordinates of a voxel volume. Chunks are axis-aligned here.
@@ -57,18 +59,19 @@
 - Overhead: `N=16 → ~42.38%`, `N=32 → ~19.95%`, `N=64 → ~9.67%` (slabs higher). See `docs/apron.md` for details.
 
 ## Authoring & Baking
-- **CSG ops**:
-  - `union(a,b)=min(a,b)`
-  - `inter(a,b)=max(a,b)`
-  - `sub(a,b)=max(a,-b)`
-  - Smooth variants (polynomial, default):
+- Visual authoring (editor mode)
+  - Author scenes in-editor using ECS components for procedural shapes and mesh-to-SDF providers. We will integrate a Yoleck-like editor workflow for in-app editing, property widgets, and scene persistence. See Yoleck for inspiration and UX patterns [`bevy-yoleck`](https://github.com/idanarye/bevy-yoleck).
+  - Editor mode controls entity creation/selection and component editing; game mode consumes only bakes. Editor mode ships as a separate build for developers.
+- CSG ops:
+  - `union(a,b)=min(a,b)`; `inter(a,b)=max(a,b)`; `sub(a,b)=max(a,-b)`.
+  - Smooth variants (polynomial):
     - \(h = clamp(0.5 + 0.5\,(b-a)/k, 0, 1)\)
     - \(s = lerp(b, a, h) - k\,h\,(1-h)\)
-- **Material conflict rule (authoring)**: choose material from contributor with smallest \(|s|\); on ties use per-shape priority, else last-writer.
-- **Composition order**: Flat list reduced in declared order; providers act like shapes.
-- **Voxelization sampling**: Evaluate at lattice nodes; optional 2× supersample when \(|s| < 0.5\,voxel\_size\).
-- **Chunk culling**: Evaluate primitive/provider only for chunks whose sample-space AABB intersects primitive AABB expanded by apron (+1 sample).
-- **Bake format** (per-volume directory, `.vxb` per chunk):
+- Material conflict rule (authoring): choose material from contributor with smallest \(|s|\); on ties use per-shape priority, else last-writer.
+- Composition order: Flat list reduced in declared order; providers act like shapes.
+- Voxelization sampling: Evaluate at lattice nodes; optional 2× supersample when \(|s| < 0.5\,voxel\_size\).
+- Chunk culling: Evaluate primitive/provider only for chunks whose sample-space AABB intersects primitive AABB expanded by apron (+1 sample).
+- Bake format (per-volume directory, `.vxb` per chunk):
 
 | Field           | Type   | Value         |
 | --------------- | ------ | ------------- |
@@ -84,10 +87,10 @@
 Body: `LZ4([sdf_f32 array], [mat_u8 array])`.
 Optional: append CRC32 to detect corruption and aid hot-reload determinism checks.
 
-- **Load path**: On startup, if bake exists → load; else author, then write bake.
-- **Dev hot-reload**: File watcher reloads chunk files; swap-in storage and enqueue remesh; builds deterministic.
-- **Determinism**: Fix thread pool size/order during authoring; identical inputs → identical outputs.
-- **Optional modifiers**: Field/noise modifiers (e.g., FastNoise2 domain warp, masks) during authoring; keep deterministic by fixing seeds.
+- Load path: On startup, if bake exists → load; else author, then write bake.
+- Dev hot-reload: File watcher reloads chunk files; swap-in storage and enqueue remesh; builds deterministic.
+- Determinism: Fix thread pool size/order during authoring; identical inputs → identical outputs.
+- Optional modifiers: Field/noise modifiers (e.g., FastNoise2 domain warp, masks) during authoring; keep deterministic by fixing seeds.
 
 ## ECS Schema (Authoring)
 - **Shapes (world-space Bevy entities)**
@@ -110,7 +113,7 @@ Optional: append CRC32 to detect corruption and aid hot-reload determinism check
 - **Normals**: Central differences with trilinear sampling at vertex position `p`:
   - \(\nabla s = normalize\big(( s(p+\delta x)-s(p-\delta x),\ s(p+\delta y)-s(p-\delta y),\ s(p+\delta z)-s(p-\delta z) )\big) / (2\,voxel\_size)\)
 - **UV/tangent policy**: Default to shader triplanar (no UV attribute required). Planar UVs are optional; see buffer-to-mesh example if needed.
-- **Material per-vertex**: Choose corner with minimal \(|s|\) among 8 cell samples; assign its `mat` to vertex; generate one submesh per material for Bevy PBR; collider uses merged triangles.
+- **Material per-vertex (encoding)**: Choose corner with minimal \(|s|\) among 8 cell samples; assign its `mat` to the vertex and encode the material id in vertex color: `color.r = (mat_id as f32) / 255.0`, `color.g = color.b = 0.0`, `color.a = 1.0`. Render with a single mesh per chunk; the shader interprets `color.r` as a compact material index and applies triplanar shading/lookups accordingly. No per-material submesh split.
 - **Transforms**: All sampling in volume-local. Gradients would use inverse-transpose for non-uniform scale (v1 uniform → no-op). Render/physics meshes use volume world transform.
 
 ## Editing & Remesh Pipeline
@@ -515,27 +518,29 @@ fn remesh_chunk_fixed<const CX: u32, const CY: u32, const CZ: u32>(
 }
 ```
 
-### Buffer → Bevy `Mesh` (+ material split via corner sampling)
+### Buffer → Bevy `Mesh` (single mesh, material id in vertex color)
 ```rust
 use bevy::prelude::*;
 
-fn buffer_to_meshes_per_material(
+fn buffer_to_mesh_single(
     chunk: &VoxelChunk,
     volume: &Volume,
     buffer: &SurfaceNetsBuffer,
-) -> HashMap<u8, Mesh> {
+) -> Mesh {
     // For each vertex, pick material from nearest cell corners (minimal |s| among 8 corners)
-    let mut per_mat: HashMap<u8, (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>)> = HashMap::new();
+    let mut positions_out: Vec<[f32; 3]> = Vec::with_capacity(buffer.positions.len());
+    let mut normals_out: Vec<[f32; 3]> = Vec::with_capacity(buffer.normals.len());
+    let mut colors_out: Vec<[f32; 4]> = Vec::with_capacity(buffer.positions.len());
+    let mut indices_out: Vec<u32> = buffer.indices.clone();
 
     // Positions/normals come from SurfaceNetsBuffer (computed via SDF gradients internally)
     // UVs: compute simple dominant-axis planar UVs
     let positions = &buffer.positions;
     let normals = &buffer.normals;
-    let indices = &buffer.indices;
 
     // Precompute per-vertex material by sampling chunk.sdf/mat in the cell that emitted the vertex
     let mut vertex_materials = vec![0u8; positions.len()];
-    for (vi, (&[x, y, z], &[nx, ny, nz])) in positions.iter().zip(normals.iter()).enumerate() {
+    for (vi, (&[x, y, z], _n)) in positions.iter().zip(normals.iter()).enumerate() {
         let p_local = Vec3::new(x, y, z);
         // Convert to lattice cell coordinates; clamp to core cell range
         let cell = world_pos_to_core_cell(chunk, volume, p_local);
@@ -543,38 +548,19 @@ fn buffer_to_meshes_per_material(
         vertex_materials[vi] = mat_id;
     }
 
-    // Bucket vertices by material and rebuild indexed meshes per material
-    // For simplicity, duplicate vertices per material bucket (can be optimized with remapping)
-    for tri in indices.chunks(3) {
-        let m0 = vertex_materials[tri[0] as usize];
-        let m1 = vertex_materials[tri[1] as usize];
-        let m2 = vertex_materials[tri[2] as usize];
-        let mat_id = if m0 == m1 || m0 == m2 { m0 } else { m1 }; // majority or fallback
-        let entry = per_mat.entry(mat_id).or_insert_with(|| (vec![], vec![], vec![], vec![]));
-        let (vtx, nrm, uv, idx) = entry;
-        let base = vtx.len() as u32;
-        for &i in tri {
-            let p = positions[i as usize];
-            let n = normals[i as usize];
-            vtx.push(p);
-            nrm.push(n);
-            uv.push(planar_uv(p, n));
-        }
-        idx.extend_from_slice(&[base, base + 1, base + 2]);
+    for (vi, p) in positions.iter().enumerate() {
+        positions_out.push(*p);
+        normals_out.push(normals[vi]);
+        let r = (vertex_materials[vi] as f32) / 255.0;
+        colors_out.push([r, 0.0, 0.0, 1.0]);
     }
 
-    // Convert buckets to Bevy Mesh assets
-    per_mat
-        .into_iter()
-        .map(|(mat_id, (vtx, nrm, uv, idx))| {
-            let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vtx);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
-            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
-            mesh.insert_indices(bevy::render::mesh::Indices::U32(idx));
-            (mat_id, mesh)
-        })
-        .collect()
+    let mut mesh = Mesh::new(bevy::render::render_resource::PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions_out);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals_out);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors_out);
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices_out));
+    mesh
 }
 ```
 

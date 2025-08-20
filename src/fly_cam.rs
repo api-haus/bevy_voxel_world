@@ -1,7 +1,6 @@
 use avian3d::prelude as avian;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use iyes_perf_ui::prelude::PerfUiAllEntries;
 
 use bevister::plugin::EditOp;
 use bevister::plugin::VoxelEditEvent;

@@ -1,14 +1,17 @@
-use bevy::prelude::{Camera3d, Capsule3d, Commands, Cuboid, KeyCode, Mesh, Mesh3d, Meshable, Plane3d, Query, Res, ResMut, Transform};
+use avian3d::prelude::{Collider, LockedAxes, RigidBody};
+use bevy::asset::Assets;
+use bevy::color::palettes::{basic, css};
+use bevy::color::Color;
+use bevy::input::ButtonInput;
 use bevy::math::Vec3;
 use bevy::pbr::{DirectionalLight, MeshMaterial3d, PointLight, StandardMaterial};
-use bevy::asset::Assets;
-use bevy::color::Color;
-use avian3d::prelude::{Collider, LockedAxes, RigidBody};
-use bevy::color::palettes::{basic, css};
+use bevy::prelude::{
+    Camera3d, Capsule3d, Commands, Cuboid, KeyCode, Mesh, Mesh3d, Meshable, Plane3d, Query, Res,
+    ResMut, Transform,
+};
+use bevy_tnua::builtins::{TnuaBuiltinJump, TnuaBuiltinWalk};
 use bevy_tnua::controller::TnuaController;
 use bevy_tnua_avian3d::TnuaAvian3dSensorShape;
-use bevy::input::ButtonInput;
-use bevy_tnua::builtins::{TnuaBuiltinJump, TnuaBuiltinWalk};
 
 // No Tnua-related setup here - this is just normal Bevy stuff.
 pub fn setup_camera_and_lights(mut commands: Commands) {
