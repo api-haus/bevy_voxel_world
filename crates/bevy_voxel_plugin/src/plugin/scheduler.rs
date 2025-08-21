@@ -150,7 +150,12 @@ pub(crate) fn pump_remesh_results(
 	mut evw: EventWriter<super::RemeshReady>,
 	mut telemetry: ResMut<super::VoxelTelemetry>,
 	mut timings: ResMut<RemeshInFlightTimings>,
+	maybe_render_mat: Option<Res<super::VoxelRenderMaterial>>,
 ) {
+	// Defer draining until voxel material is ready to avoid dropping results before meshes can be applied
+	if maybe_render_mat.is_none() {
+		return;
+	}
 	loop {
 		let Ok(guard) = channels.rx.lock() else { break };
 		match guard.try_recv() {

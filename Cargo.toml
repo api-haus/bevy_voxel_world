@@ -1,7 +1,11 @@
 #cargo-features = ["codegen-backend"]
 
 [workspace]
-members = ["crates/bevy_voxel_plugin", "crates/voxel_demo_app"]
+members = [
+	"crates/bevy_voxel_plugin",
+	"crates/voxel_demo_app",
+	"crates/asset_prep",
+]
 resolver = "2"
 
 [workspace.dependencies]

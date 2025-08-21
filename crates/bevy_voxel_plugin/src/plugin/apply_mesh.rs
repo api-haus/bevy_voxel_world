@@ -12,13 +12,16 @@ use ilattice::prelude::IVec3 as ILVec3;
 
 pub(crate) fn apply_remeshes(
 	desc: Res<super::VoxelVolumeDesc>,
-	render_mat: Res<super::VoxelRenderMaterial>,
+	render_mat: Option<Res<super::VoxelRenderMaterial>>,
 	mut telemetry: ResMut<super::VoxelTelemetry>,
 	mut meshes: ResMut<Assets<Mesh>>,
 	mut commands: Commands,
 	mut evr: EventReader<super::RemeshReady>,
 	mut q_chunk_tf: Query<(&super::VoxelChunk, &VoxelStorage, &mut Transform)>,
 ) {
+	let Some(render_mat) = render_mat else {
+		return;
+	};
 	for ev in evr.read() {
 		let span = info_span!(
 				"apply_mesh",

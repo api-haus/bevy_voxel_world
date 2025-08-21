@@ -4,6 +4,7 @@ use bevy_rand::global::GlobalEntropy;
 use ilattice::prelude::{IVec3 as ILVec3, UVec3};
 use rand::Rng;
 use rayon::prelude::*;
+use tracing::{debug, info_span, trace};
 
 use crate::core::index::linear_index;
 use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
@@ -45,6 +46,13 @@ pub(crate) fn seed_random_spheres_sdf(
 	mut q_chunks: Query<(Entity, &mut VoxelStorage, &crate::plugin::VoxelChunk)>,
 	mut rng: GlobalEntropy<WyRand>,
 ) {
+	let span = info_span!(
+			"seed_random_spheres_sdf",
+			grid = ?desc.grid_dims,
+			core = ?desc.chunk_core_dims,
+			origin = ?desc.origin_cell
+	);
+	let _enter = span.enter();
 	let vol_shape = ILVec3::new(
 		(desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
 		(desc.grid_dims.y * desc.chunk_core_dims.y) as i32,
@@ -101,6 +109,7 @@ pub(crate) fn seed_random_spheres_sdf(
 		})
 		.collect();
 
+	debug!("seed_tasks count={}", tasks.len());
 	let results: Vec<(Entity, Vec<f32>, Vec<u8>)> = tasks
 		.par_iter()
 		.map(|task| {
@@ -131,9 +140,11 @@ pub(crate) fn seed_random_spheres_sdf(
 				.collect();
 
 			if intersecting.is_empty() {
+				trace!(target: "vox", "seed_chunk_empty entity={:?} sample_min={:?} dims={:?}", task.entity, task.sample_min, task.sample_dims);
 				return (task.entity, sdf, mat);
 			}
 
+			let mut any_solid = false;
 			for z in 0..sz {
 				for y in 0..sy {
 					for x in 0..sx {
@@ -158,12 +169,19 @@ pub(crate) fn seed_random_spheres_sdf(
 						}
 						sdf[idx] = dmin;
 						mat[idx] = if dmin <= 0.0 {
+							any_solid = true;
 							material_from_noise(p)
 						} else {
 							AIR_ID
 						};
 					}
 				}
+			}
+
+			if any_solid {
+				trace!(target: "vox", "seed_chunk_solid entity={:?}", task.entity);
+			} else {
+				trace!(target: "vox", "seed_chunk_no_solid entity={:?}", task.entity);
 			}
 
 			(task.entity, sdf, mat)
@@ -175,6 +193,7 @@ pub(crate) fn seed_random_spheres_sdf(
 			storage.sdf.copy_from_slice(&sdf);
 			storage.mat.copy_from_slice(&mat);
 			queue.inner.push_back(e);
+			trace!(target: "vox", "seed_chunk_enqueued entity={:?}", e);
 		}
 	}
 }

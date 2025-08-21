@@ -6,6 +6,7 @@ use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{
 	AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
 };
+use tracing::{debug, info, warn};
 
 #[derive(Resource, Clone)]
 pub(crate) struct VoxelRenderMaterial {
@@ -15,11 +16,13 @@ pub(crate) struct VoxelRenderMaterial {
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 #[bind_group_data(TriplanarExtensionKey)]
 pub struct TriplanarExtension {
-	#[texture(100)]
+	#[texture(100, dimension = "2d_array")]
 	#[sampler(101)]
-	pub(crate) albedo_map: Option<Handle<Image>>,
+	pub(crate) albedo_array: Handle<Image>,
 	#[uniform(102)]
 	pub(crate) tiling_scale: f32,
+	#[uniform(103)]
+	pub(crate) albedo_layer_count: u32,
 	pub(crate) debug_mat_vis: bool,
 }
 
@@ -39,8 +42,9 @@ impl From<&TriplanarExtension> for TriplanarExtensionKey {
 impl Default for TriplanarExtension {
 	fn default() -> Self {
 		Self {
-			albedo_map: None,
+			albedo_array: Default::default(),
 			tiling_scale: 0.08,
+			albedo_layer_count: 1,
 			debug_mat_vis: false,
 		}
 	}
@@ -69,26 +73,41 @@ impl MaterialExtension for TriplanarExtension {
 	}
 }
 
-pub(crate) fn setup_voxel_material(
-	mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, TriplanarExtension>>>,
-	asset_server: Res<AssetServer>,
+pub(crate) fn init_voxel_material_when_ready(
 	mut commands: Commands,
+	mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, TriplanarExtension>>>,
+	mut images: ResMut<Assets<Image>>,
+	asset_server: Res<AssetServer>,
+	maybe_existing: Option<Res<VoxelRenderMaterial>>,
 ) {
-	let albedo: Handle<Image> =
-		asset_server.load("free_stylized_textures/ground_01_1k/ground_01_color_1k.png");
-	let handle = materials.add(ExtendedMaterial {
-		base: StandardMaterial {
-			base_color: Color::WHITE,
-			base_color_texture: None,
-			perceptual_roughness: 0.8,
-			metallic: 0.0,
-			..Default::default()
-		},
-		extension: TriplanarExtension {
-			albedo_map: Some(albedo),
-			tiling_scale: 0.08,
-			debug_mat_vis: false,
-		},
-	});
-	commands.insert_resource(VoxelRenderMaterial { handle });
+	if maybe_existing.is_some() {
+		return;
+	}
+	let stacked: Handle<Image> = asset_server.load("generated/albedo_array_stacked.png");
+	if let Some(img) = images.get_mut(&stacked) {
+		debug!(target: "vox", "voxel_mat_image_ready size=({}x{}), format={:?}", img.texture_descriptor.size.width, img.texture_descriptor.size.height, img.texture_descriptor.format);
+		let width = img.texture_descriptor.size.width.max(1);
+		let height = img.texture_descriptor.size.height;
+		let layers = (height / width).max(1);
+		img.reinterpret_stacked_2d_as_array(layers);
+		let handle = materials.add(ExtendedMaterial {
+			base: StandardMaterial {
+				base_color: Color::WHITE,
+				base_color_texture: None,
+				perceptual_roughness: 0.8,
+				metallic: 0.0,
+				..Default::default()
+			},
+			extension: TriplanarExtension {
+				albedo_array: stacked.clone(),
+				tiling_scale: 0.08,
+				albedo_layer_count: layers,
+				debug_mat_vis: true,
+			},
+		});
+		commands.insert_resource(VoxelRenderMaterial { handle });
+		info!(target: "vox", "voxel_mat_created layers={}", layers);
+	} else {
+		warn!(target: "vox", "voxel_mat_image_not_ready (asset not yet loaded)");
+	}
 }

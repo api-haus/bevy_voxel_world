@@ -17,7 +17,7 @@ use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
 pub(crate) use materials::VoxelRenderMaterial;
-pub(crate) use materials::setup_voxel_material;
+pub(crate) use materials::init_voxel_material_when_ready;
 pub(crate) use scheduler::{
 	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
@@ -117,7 +117,6 @@ impl Plugin for VoxelPlugin {
 				Startup,
 				(
 					volume_spawn::spawn_volume_chunks,
-					setup_voxel_material,
 					authoring::seed_random_spheres_sdf,
 				)
 					.chain(),
@@ -125,6 +124,7 @@ impl Plugin for VoxelPlugin {
 			.add_systems(
 				Update,
 				(
+					init_voxel_material_when_ready,
 					editing::apply_edit_events.in_set(VoxelSet::Editing),
 					update_telemetry_begin
 						.in_set(VoxelSet::Schedule)

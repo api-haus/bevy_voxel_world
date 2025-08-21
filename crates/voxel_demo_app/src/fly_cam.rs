@@ -4,6 +4,7 @@ use bevy_enhanced_input::prelude::*;
 
 use bevy_voxel_plugin::plugin::EditOp;
 use bevy_voxel_plugin::plugin::VoxelEditEvent;
+use bevy_voxel_plugin::plugin::VoxelVolumeDesc;
 
 #[derive(Component)]
 pub struct FlyCamCtx;
@@ -59,12 +60,21 @@ pub struct SpawnBall;
 #[action_output(bool)]
 pub struct Place;
 
-pub fn setup(mut commands: Commands) {
+pub fn setup(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
 	commands.insert_resource(FlyCamTuning::default());
+
+	// Position camera to view the center of the voxel volume
+	let total_dims = Vec3::new(
+		(desc.grid_dims.x * desc.chunk_core_dims.x) as f32,
+		(desc.grid_dims.y * desc.chunk_core_dims.y) as f32,
+		(desc.grid_dims.z * desc.chunk_core_dims.z) as f32,
+	);
+	let center = Vec3::new(total_dims.x * 0.5, total_dims.y * 0.5, total_dims.z * 0.5);
+	let cam_pos = center + Vec3::new(0.0, 48.0, 96.0);
 
 	commands.spawn((
 		Camera3d::default(),
-		Transform::from_xyz(0.0, 24.0, 72.0).looking_at(Vec3::ZERO, Vec3::Y),
+		Transform::from_translation(cam_pos).looking_at(center, Vec3::Y),
 		FlyCam::default(),
 		FlyCamCtx,
 		// Bindings modeled after the bevy_enhanced_input simple fly cam
@@ -100,14 +110,14 @@ pub fn setup(mut commands: Commands) {
 		]),
 	));
 
-	// Simple light
+	// Simple light aimed at the volume center
 	commands.spawn((
 		DirectionalLight {
 			illuminance: 4000.0,
 			shadows_enabled: true,
 			..Default::default()
 		},
-		Transform::default().looking_at(-Vec3::Y, Vec3::Z),
+		Transform::from_translation(center + Vec3::new(64.0, 128.0, 64.0)).looking_at(center, Vec3::Y),
 	));
 }
 
