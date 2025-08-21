@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{info_span, trace};
 
+use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions_arrays;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
+use ilattice::prelude::UVec3;
 
 // Budget for remeshing work per frame
 #[derive(Resource, Debug, Clone, Copy)]
@@ -79,8 +81,9 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 			continue;
 		}
 
-		// Copy SDF to move into the rayon task
+		// Copy SDF and materials to move into the rayon task
 		let sdf: Vec<f32> = storage.sdf.iter().copied().collect();
+		let mat: Vec<u8> = storage.mat.iter().copied().collect();
 		let tx = channels.tx.clone();
 		let job_span = info_span!("remesh_job_spawn", entity = ?entity, sample_dims = ?s);
 		let _job_enter = job_span.enter();
@@ -125,7 +128,18 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 			}
 			trace!(target: "vox", "fsn_done entity={:?} positions={} indices={} duration_ms={:.3}", entity, buffer.positions.len(), buffer.indices.len(), dur_ms);
 
-			let _ = tx.send(super::RemeshReady { entity, buffer });
+			// Compute per-vertex materials and convert to colors
+			let vmat = select_vertex_materials_from_positions_arrays(s, &sdf, &mat, &buffer.positions);
+			let vertex_colors: Vec<[f32; 4]> = vmat
+				.iter()
+				.map(|&m| [(m as f32) / 255.0, 0.0, 0.0, 1.0])
+				.collect();
+
+			let _ = tx.send(super::RemeshReady {
+				entity,
+				buffer,
+				vertex_colors: Some(vertex_colors),
+			});
 		});
 	}
 }

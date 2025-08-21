@@ -1,12 +1,42 @@
 use bevy::prelude::*;
 use bevy_prng::*;
 use bevy_rand::global::GlobalEntropy;
-use ilattice::prelude::{IVec3, UVec3};
+use ilattice::prelude::{IVec3 as ILVec3, UVec3};
 use rand::Rng;
 use rayon::prelude::*;
 
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::VoxelStorage;
+use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
+
+/// Simple integer hash mix (wyhash-inspired) for generating deterministic noise
+#[inline]
+fn hash32(mut x: u32) -> u32 {
+	x ^= x >> 16;
+	x = x.wrapping_mul(0x7feb_352d);
+	x ^= x >> 15;
+	x = x.wrapping_mul(0x846c_a68b);
+	x ^= x >> 16;
+	x
+}
+
+#[inline]
+fn hash3(x: u32, y: u32, z: u32, seed: u32) -> u32 {
+	hash32(x ^ hash32(y ^ hash32(z ^ seed)))
+}
+
+/// Deterministic material id from integer position using coarse 3D cells.
+/// Returns a non-zero material id in [1, 255].
+#[inline]
+fn material_from_noise(pos: ILVec3) -> u8 {
+	const REGION: i32 = 5;
+	const SEED: u32 = 0xA53C_9E21;
+	let gx = pos.x.div_euclid(REGION) as u32;
+	let gy = pos.y.div_euclid(REGION) as u32;
+	let gz = pos.z.div_euclid(REGION) as u32;
+	let h = hash3(gx, gy, gz, SEED);
+	let id = (h % 255u32) as u8;
+	if id == 0 { 1 } else { id }
+}
 
 /// Random sphere field seeding used in the demo. Behavior identical to the previous inline version.
 pub(crate) fn seed_random_spheres_sdf(
@@ -15,7 +45,7 @@ pub(crate) fn seed_random_spheres_sdf(
 	mut q_chunks: Query<(Entity, &mut VoxelStorage, &crate::plugin::VoxelChunk)>,
 	mut rng: GlobalEntropy<WyRand>,
 ) {
-	let vol_shape = IVec3::new(
+	let vol_shape = ILVec3::new(
 		(desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
 		(desc.grid_dims.y * desc.chunk_core_dims.y) as i32,
 		(desc.grid_dims.z * desc.chunk_core_dims.z) as i32,
@@ -23,10 +53,10 @@ pub(crate) fn seed_random_spheres_sdf(
 	let sphere_count = 400usize;
 	#[derive(Clone, Copy)]
 	struct Sphere {
-		center: IVec3,
+		center: ILVec3,
 		radius: f32,
-		aabb_min: IVec3,
-		aabb_max: IVec3,
+		aabb_min: ILVec3,
+		aabb_max: ILVec3,
 	}
 	let spheres: Vec<Sphere> = (0..sphere_count)
 		.map(|_| {
@@ -34,10 +64,10 @@ pub(crate) fn seed_random_spheres_sdf(
 			let cy = rng.random_range(0..vol_shape.y);
 			let cz = rng.random_range(0..vol_shape.z);
 			let r = rng.random_range(2.0f32..16.0f32);
-			let center = IVec3::new(cx, cy, cz);
+			let center = ILVec3::new(cx, cy, cz);
 			let rr = r.ceil() as i32 + 1;
-			let aabb_min = center - IVec3::splat(rr);
-			let aabb_max = center + IVec3::splat(rr);
+			let aabb_min = center - ILVec3::splat(rr);
+			let aabb_max = center + ILVec3::splat(rr);
 			Sphere {
 				center,
 				radius: r,
@@ -50,13 +80,19 @@ pub(crate) fn seed_random_spheres_sdf(
 	#[derive(Clone, Copy)]
 	struct ChunkTask {
 		entity: Entity,
-		sample_min: IVec3,
+		sample_min: ILVec3,
 		sample_dims: UVec3,
 	}
 	let tasks: Vec<ChunkTask> = q_chunks
 		.iter_mut()
 		.map(|(e, storage, chunk)| {
-			let sample_min = super::super::plugin::sample_min(&desc, chunk.chunk_coords);
+			let core = desc.chunk_core_dims;
+			let offset = ILVec3::new(
+				(core.x as i32) * chunk.chunk_coords.x,
+				(core.y as i32) * chunk.chunk_coords.y,
+				(core.z as i32) * chunk.chunk_coords.z,
+			);
+			let sample_min = desc.origin_cell + offset - ILVec3::ONE;
 			ChunkTask {
 				entity: e,
 				sample_min,
@@ -65,7 +101,7 @@ pub(crate) fn seed_random_spheres_sdf(
 		})
 		.collect();
 
-	let results: Vec<(Entity, Vec<f32>)> = tasks
+	let results: Vec<(Entity, Vec<f32>, Vec<u8>)> = tasks
 		.par_iter()
 		.map(|task| {
 			let sx = task.sample_dims.x;
@@ -73,8 +109,9 @@ pub(crate) fn seed_random_spheres_sdf(
 			let sz = task.sample_dims.z;
 			let len = (sx * sy * sz) as usize;
 			let mut sdf = vec![f32::INFINITY; len];
+			let mut mat = vec![AIR_ID; len];
 			let chunk_min = task.sample_min;
-			let chunk_max = IVec3::new(
+			let chunk_max = ILVec3::new(
 				chunk_min.x + sx as i32 - 1,
 				chunk_min.y + sy as i32 - 1,
 				chunk_min.z + sz as i32 - 1,
@@ -94,13 +131,13 @@ pub(crate) fn seed_random_spheres_sdf(
 				.collect();
 
 			if intersecting.is_empty() {
-				return (task.entity, sdf);
+				return (task.entity, sdf, mat);
 			}
 
 			for z in 0..sz {
 				for y in 0..sy {
 					for x in 0..sx {
-						let p = IVec3::new(x as i32, y as i32, z as i32) + chunk_min;
+						let p = ILVec3::new(x as i32, y as i32, z as i32) + chunk_min;
 						let idx = linear_index(x, y, z, task.sample_dims);
 						let mut dmin = sdf[idx];
 						for s in &intersecting {
@@ -120,17 +157,23 @@ pub(crate) fn seed_random_spheres_sdf(
 							dmin = dmin.min(dist - s.radius);
 						}
 						sdf[idx] = dmin;
+						mat[idx] = if dmin <= 0.0 {
+							material_from_noise(p)
+						} else {
+							AIR_ID
+						};
 					}
 				}
 			}
 
-			(task.entity, sdf)
+			(task.entity, sdf, mat)
 		})
 		.collect();
 
-	for (entity, sdf) in results.into_iter() {
+	for (entity, sdf, mat) in results.into_iter() {
 		if let Ok((e, mut storage, _chunk)) = q_chunks.get_mut(entity) {
 			storage.sdf.copy_from_slice(&sdf);
+			storage.mat.copy_from_slice(&mat);
 			queue.inner.push_back(e);
 		}
 	}

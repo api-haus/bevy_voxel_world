@@ -12,8 +12,6 @@ use prelude::EnhancedInputPlugin;
 
 use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin};
 mod diag;
-
-mod demo1;
 mod fly_cam;
 
 fn main() {

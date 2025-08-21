@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use ilattice::prelude::IVec3;
+use ilattice::prelude::IVec3 as ILVec3;
 
 use crate::core::index::linear_index;
 use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
@@ -28,8 +28,14 @@ pub(crate) fn apply_edit_events(
 		let radius = ev.radius;
 		for (entity, mut storage, chunk) in q_chunks.iter_mut() {
 			let s = storage.dims.sample;
-			let min = super::sample_min(&desc, chunk.chunk_coords);
-			let max = IVec3::new(
+			let core = desc.chunk_core_dims;
+			let offset = ILVec3::new(
+				(core.x as i32) * chunk.chunk_coords.x,
+				(core.y as i32) * chunk.chunk_coords.y,
+				(core.z as i32) * chunk.chunk_coords.z,
+			);
+			let min = desc.origin_cell + offset - ILVec3::ONE;
+			let max = ILVec3::new(
 				min.x + (s.x as i32 - 1),
 				min.y + (s.y as i32 - 1),
 				min.z + (s.z as i32 - 1),
@@ -80,7 +86,7 @@ pub(crate) fn apply_edit_events(
 	}
 }
 
-fn sphere_aabb_intersects(center: Vec3, radius: f32, min: IVec3, max: IVec3) -> bool {
+fn sphere_aabb_intersects(center: Vec3, radius: f32, min: ILVec3, max: ILVec3) -> bool {
 	let mut d2 = 0.0f32;
 	let c = center;
 	let clamp = |v: f32, lo: f32, hi: f32| v.max(lo).min(hi);

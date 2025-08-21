@@ -6,6 +6,9 @@ use std::time::Instant;
 use tracing::{info_span, trace};
 
 use crate::voxel_plugin::meshing::bevy_mesh::buffer_to_meshes_per_material;
+use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions;
+use crate::voxel_plugin::voxels::storage::VoxelStorage;
+use ilattice::prelude::IVec3 as ILVec3;
 
 pub(crate) fn apply_remeshes(
 	desc: Res<super::VoxelVolumeDesc>,
@@ -14,7 +17,7 @@ pub(crate) fn apply_remeshes(
 	mut meshes: ResMut<Assets<Mesh>>,
 	mut commands: Commands,
 	mut evr: EventReader<super::RemeshReady>,
-	mut q_chunk_tf: Query<(&super::VoxelChunk, &mut Transform)>,
+	mut q_chunk_tf: Query<(&super::VoxelChunk, &VoxelStorage, &mut Transform)>,
 ) {
 	for ev in evr.read() {
 		let span = info_span!(
@@ -26,7 +29,21 @@ pub(crate) fn apply_remeshes(
 		let _enter = span.enter();
 		let t0 = Instant::now();
 
-		let meshes_vec = buffer_to_meshes_per_material(&ev.buffer, None);
+		let vertex_colors: Option<Vec<[f32; 4]>> = if let Some(colors) = &ev.vertex_colors {
+			Some(colors.clone())
+		} else if let Ok((_chunk, storage, _tf)) = q_chunk_tf.get_mut(ev.entity) {
+			let mats = select_vertex_materials_from_positions(storage, &ev.buffer.positions);
+			Some(
+				mats
+					.iter()
+					.map(|&m| [(m as f32) / 255.0, 0.0, 0.0, 1.0])
+					.collect(),
+			)
+		} else {
+			None
+		};
+
+		let meshes_vec = buffer_to_meshes_per_material(&ev.buffer, vertex_colors.as_deref());
 		if meshes_vec.is_empty() {
 			continue;
 		}
@@ -36,8 +53,14 @@ pub(crate) fn apply_remeshes(
 		let mesh_handle = meshes.add(mesh);
 		let mesh_id = mesh_handle.id();
 
-		if let Ok((chunk, mut transform)) = q_chunk_tf.get_mut(ev.entity) {
-			let min = super::sample_min(&desc, chunk.chunk_coords);
+		if let Ok((chunk, _storage, mut transform)) = q_chunk_tf.get_mut(ev.entity) {
+			let core = desc.chunk_core_dims;
+			let offset = ILVec3::new(
+				(core.x as i32) * chunk.chunk_coords.x,
+				(core.y as i32) * chunk.chunk_coords.y,
+				(core.z as i32) * chunk.chunk_coords.z,
+			);
+			let min = desc.origin_cell + offset - ILVec3::ONE;
 			transform.translation = Vec3::new(min.x as f32, min.y as f32, min.z as f32);
 
 			commands.entity(ev.entity).insert((

@@ -1,0 +1,57 @@
+---
+description:
+globs: *.rs
+alwaysApply: false
+---
+
+### MCP: Cursor Rust Tools — Rust Docs Lookup
+
+- **Purpose**: Enhance Rust assistance by proactively fetching authoritative docs for symbols from crates and std using the Cursor Rust Tools MCP before answering.
+
+- **Primary tools**:
+  - `mcp_cursor_rust_tools_symbol_docs(dependency, file, symbol?)`
+  - `mcp_cursor_rust_tools_symbol_references(file, line, symbol)`
+  - `mcp_cursor_rust_tools_symbol_impl(file, line, symbol)`
+  - `mcp_cursor_rust_tools_cargo_check(file, only_errors)`
+  - `mcp_cursor_rust_tools_cargo_test(file, backtrace?, test?)`
+
+### When to fetch docs (do this first)
+- **User asks about a Rust API**: “What does X do?”, “How to use X?”, “What’s the difference between X and Y?”
+- **Symbol in an error**: Any compiler error mentioning a type, trait, function, macro, or module.
+- **Before proposing an API-driven change**: If guidance depends on the exact signatures/traits/feature flags/versions.
+- **Ambiguity**: If multiple crates provide the same symbol name, fetch docs for each plausible dependency in parallel.
+
+### How to use the tools
+- **Project root**: Use the workspace `Cargo.toml` absolute path as `file` (compute it programmatically).
+- **Docs lookup**:
+  - If the symbol’s crate is known from imports, pass that crate name as `dependency` and the symbol as `symbol`.
+  - If unknown, infer candidates from `use` lines, error messages, or prior code context; fetch for each candidate in parallel.
+  - For std types/macros, use `dependency = "std"` and `symbol` when applicable.
+- **Deep dive (optional, when relevant)**:
+  - Use `symbol_references` to see where a symbol is used locally for context-sensitive answers.
+  - Use `symbol_impl` to inspect trait impls or concrete implementations when behavior changes by type.
+- **Compilation context**:
+  - Use `cargo_check(file, only_errors=false)` to get warnings and feature-gated hints when docs suggest conditional APIs.
+- **Parallelize**: When multiple symbols or dependencies are involved, fetch docs in parallel to reduce latency.
+
+### Response guidelines
+- **Lead with facts from docs**: Summarize authoritative info (signature, trait bounds, lifetimes, feature flags, panics, safety notes).
+- **Show minimal examples**: Prefer concise Rust snippets tailored to the user’s code context.
+- **Version-awareness**: If the crate version is discernible, note breaking/added changes relevant to the question.
+- **Disambiguate**: If multiple crates match, present the most likely first, then alternatives.
+- **Cite source**: Mention that info was pulled via the MCP docs lookup. Do not paste full URLs unless specifically requested.
+- **Keep it tight**: Provide actionable guidance with minimal verbosity.
+
+### Triggers and heuristics
+- Mentions of functions, macros, traits, derive macros, or attributes (e.g., `#[derive(Serialize)]`) → docs lookup.
+- Error codes `E0xxx` with symbol names → docs + optionally `cargo_check` to surface more context.
+- Questions about trait method availability or blanket impls → docs + `symbol_impl`.
+
+### Examples (conceptual)
+- “What’s the difference between `Arc<T>` and `Rc<T>`?” → fetch `std` docs for `Arc` and `Rc`; summarize thread-safety and clone semantics.
+- “How do I use `serde_json::from_str` with my type?” → dependency `serde_json`, symbol `from_str`; include example and common error pitfalls.
+- “Why doesn’t `tokio::spawn_blocking` compile here?” → dependency `tokio`, symbol `spawn_blocking`; run `cargo_check` to reveal missing features or runtime mismatch.
+
+### Non-goals
+- Do not rely solely on memory or prior knowledge for symbol details when docs are available.
+- Do not over-quote docs; synthesize and adapt to the user’s context.

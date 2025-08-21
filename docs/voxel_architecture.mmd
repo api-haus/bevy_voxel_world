@@ -1,0 +1,72 @@
+flowchart TD
+  app["Bevy App"] --> plugin["VoxelPlugin"]
+
+  subgraph ecs["ECS World"]
+    res["Resources: VoxelVolumeDesc, RemeshBudget, RemeshQueue, RemeshResultChannel, VoxelTelemetry, RemeshInFlightTimings, VoxelRenderMaterial"]
+    comps["Components: VoxelVolume, VoxelChunk, VoxelStorage"]
+    events["Events: VoxelEditEvent, RemeshReady"]
+  end
+
+  plugin --> res
+  plugin --> events
+
+  subgraph startup["Startup Systems"]
+    spawn["spawn_volume_chunks"]
+    mat_setup["setup_voxel_material"]
+    seed["seed_random_spheres_sdf"]
+  end
+  plugin --> startup
+  spawn --> comps
+  mat_setup --> res
+
+  subgraph editing["Editing Set"]
+    apply_edits["apply_edit_events"]
+  end
+  apply_edits --> storage_mut["mutate VoxelStorage (sdf/mat)"]
+  apply_edits --> queue["enqueue entity in RemeshQueue"]
+
+  subgraph schedule["Schedule Set"]
+    telem_begin["update_telemetry_begin"]
+    drain["drain_queue_and_spawn_jobs"]
+    pump["pump_remesh_results"]
+  end
+
+  queue --> drain
+  telem_begin --> drain
+  drain -- "rayon::spawn" --> worker["Background meshing (fast_surface_nets)"]
+  worker -- "send" --> channel["RemeshResultChannel (mpsc)"]
+  channel --> pump
+  pump --> remesh_ready["RemeshReady events"]
+
+  subgraph apply["ApplyMeshes Set"]
+    apply_mesh["apply_remeshes"]
+    diag["publish_diagnostics (Perf UI)"]
+  end
+  remesh_ready --> apply_mesh
+  apply_mesh --> assets["Meshes + Colliders on VoxelChunk"]
+  apply_mesh --> telemetry["VoxelTelemetry (frame stats)"]
+
+  subgraph meshing["Meshing"]
+    fsn["fast_surface_nets"]
+    bevy_mesh["buffer_to_meshes_per_material"]
+  end
+  worker --> fsn
+  apply_mesh --> bevy_mesh
+
+  subgraph core["Core utils"]
+    grid["core::grid::ChunkDims + extents"]
+    index["core::index::linear_index, delinearize"]
+  end
+  comps --> grid
+  comps --> index
+  apply_edits --> index
+
+  subgraph materials["Materials/Shaders"]
+    extMat["ExtendedMaterial(StandardMaterial, TriplanarExtension)"]
+    shader["shaders/triplanar_pbr.wgsl"]
+  end
+  mat_setup --> extMat
+  extMat --> shader
+
+  seed --> storage_fill["fill VoxelStorage.sdf"]
+  seed --> queue

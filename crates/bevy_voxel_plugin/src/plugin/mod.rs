@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 use fast_surface_nets::SurfaceNetsBuffer;
 use ilattice::prelude::{IVec3, UVec3};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
 
 mod apply_mesh;
 mod editing;
@@ -18,9 +16,10 @@ mod authoring {
 use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
-pub(crate) use materials::{setup_voxel_material, VoxelRenderMaterial};
+pub(crate) use materials::VoxelRenderMaterial;
+pub(crate) use materials::setup_voxel_material;
 pub(crate) use scheduler::{
-	drain_queue_and_spawn_jobs, pump_remesh_results, RemeshBudget, RemeshQueue,
+	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
 pub(crate) use tracing::telemetry::VoxelTelemetry;
 use tracing::telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
@@ -60,11 +59,8 @@ pub struct VoxelChunk {
 pub struct RemeshReady {
 	pub entity: Entity,
 	pub buffer: SurfaceNetsBuffer,
+	pub vertex_colors: Option<Vec<[f32; 4]>>,
 }
-
-// Scheduler types moved to `scheduler.rs`
-
-// Telemetry moved to `telemetry.rs`
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub enum VoxelSet {
@@ -98,6 +94,8 @@ impl Plugin for VoxelPlugin {
 				),
 			)
 			.insert_resource({
+				use std::sync::mpsc::channel;
+				use std::sync::{Arc, Mutex};
 				let (tx, rx) = channel();
 				scheduler::RemeshResultChannel {
 					tx,
@@ -138,16 +136,4 @@ impl Plugin for VoxelPlugin {
 				),
 			);
 	}
-}
-
-// spawn_volume_chunks moved to volume_spawn.rs
-
-pub(crate) fn sample_min(desc: &VoxelVolumeDesc, chunk_coords: IVec3) -> IVec3 {
-	let core = desc.chunk_core_dims;
-	let offset = IVec3::new(
-		(core.x as i32) * chunk_coords.x,
-		(core.y as i32) * chunk_coords.y,
-		(core.z as i32) * chunk_coords.z,
-	);
-	desc.origin_cell + offset - IVec3::ONE
 }
