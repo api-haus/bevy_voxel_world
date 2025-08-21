@@ -13,3 +13,4 @@ bevy_prng = { workspace = true }
 bevy_rand = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
+iyes_perf_ui = { workspace = true }

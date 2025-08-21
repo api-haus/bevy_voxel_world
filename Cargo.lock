@@ -397,38 +397,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "bevister"
-version = "0.1.0"
-dependencies = [
- "avian3d",
- "bevy",
- "bevy-tnua",
- "bevy-tnua-avian3d",
- "bevy-yoleck",
- "bevy_egui",
- "bevy_enhanced_input",
- "bevy_hanabi",
- "bevy_prng",
- "bevy_rand",
- "fast-surface-nets",
- "glam 0.30.5",
- "ilattice",
- "iyes_perf_ui",
- "log",
- "mesh_to_sdf",
- "rand 0.9.2",
- "rand_core 0.9.3",
- "rayon",
- "taffy 0.9.0",
- "tracing",
-]
-
-[[package]]
 name = "bevy"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b8369c16b7c017437021341521f8b4a0d98e1c70113fb358c3258ae7d661d79"
 dependencies = [
+ "bevy_dylib",
  "bevy_internal",
 ]
 
@@ -461,32 +435,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "914d26cf060dd50852d66fe31edf385fd5b9ea7f57a9ca5ddd9ba628b4157747"
 dependencies = [
  "bevy",
-]
-
-[[package]]
-name = "bevy-yoleck"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d670d2be9527f40e5630f904af86e334ce0b6352fa4849a19e3487c34eb2088"
-dependencies = [
- "bevy",
- "bevy-yoleck-macros",
- "bevy_egui",
- "serde",
- "serde_json",
- "thiserror 2.0.15",
- "uuid",
-]
-
-[[package]]
-name = "bevy-yoleck-macros"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed721396209f8172af6a86b5397b5be9784776f57f6a22107051c9caf07d586"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -703,6 +651,15 @@ dependencies = [
  "log",
  "serde",
  "sysinfo",
+]
+
+[[package]]
+name = "bevy_dylib"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dc3602098b2604941b2829a04ac316de1e36aad949cbffce8861896b9b32532"
+dependencies = [
+ "bevy_internal",
 ]
 
 [[package]]
@@ -1558,7 +1515,7 @@ dependencies = [
  "nonmax",
  "serde",
  "smallvec",
- "taffy 0.7.7",
+ "taffy",
  "thiserror 2.0.15",
  "tracing",
 ]
@@ -1571,6 +1528,22 @@ checksum = "94f7a8905a125d2017e8561beefb7f2f5e67e93ff6324f072ad87c5fd6ec3b99"
 dependencies = [
  "bevy_platform",
  "thread_local",
+]
+
+[[package]]
+name = "bevy_voxel_plugin"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
+ "bevy_prng",
+ "bevy_rand",
+ "fast-surface-nets",
+ "ilattice",
+ "iyes_perf_ui",
+ "rand 0.9.2",
+ "rayon",
+ "tracing",
 ]
 
 [[package]]
@@ -1758,20 +1731,6 @@ name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
-
-[[package]]
-name = "bvh"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb3ba37f539b414d67436ce143437b697dbb1a5b7aed161258f2a88b1bffa6b0"
-dependencies = [
- "approx",
- "log",
- "nalgebra",
- "num",
- "rand 0.8.5",
- "rayon",
-]
 
 [[package]]
 name = "bytemuck"
@@ -2507,15 +2466,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "float-cmp"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2659,11 +2609,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "r-efi",
  "wasi 0.14.2+wasi-0.2.4",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -2728,12 +2676,6 @@ dependencies = [
  "rand 0.8.5",
  "serde",
 ]
-
-[[package]]
-name = "glam"
-version = "0.30.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2d1aab06663bdce00d6ca5e5ed586ec8d18033a771906c993a1e3755b368d85"
 
 [[package]]
 name = "glob"
@@ -2854,12 +2796,6 @@ name = "grid"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
-
-[[package]]
-name = "grid"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12101ecc8225ea6d675bc70263074eab6169079621c2186fe0c66590b2df9681"
 
 [[package]]
 name = "guillotiere"
@@ -3422,24 +3358,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mesh_to_sdf"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728ff00d6f9aa922a057677678394bbca154878f1af35cf9a2479336f29223af"
-dependencies = [
- "bvh",
- "float-cmp",
- "itertools 0.13.0",
- "log",
- "nalgebra",
- "ordered-float",
- "parking_lot",
- "rayon",
- "rstar",
- "web-time",
-]
-
-[[package]]
 name = "metal"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3526,7 +3444,6 @@ dependencies = [
  "num-complex",
  "num-rational",
  "num-traits",
- "serde",
  "simba",
  "typenum",
 ]
@@ -3670,20 +3587,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35bd024e8b2ff75562e5f34e7f4905839deb4b22955ef5e73d2fea1b9813cb23"
-dependencies = [
- "num-bigint",
- "num-complex",
- "num-integer",
- "num-iter",
- "num-rational",
- "num-traits",
-]
-
-[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3700,7 +3603,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -3720,17 +3622,6 @@ version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
 dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "num-iter"
-version = "0.1.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
-dependencies = [
- "autocfg",
- "num-integer",
  "num-traits",
 ]
 
@@ -5130,19 +5021,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab4f4d046dd956a47a7e1a2947083d7ac3e6aa3cfaaead36173ceaa5ab11878c"
 dependencies = [
  "arrayvec",
- "grid 0.15.0",
- "serde",
- "slotmap",
-]
-
-[[package]]
-name = "taffy"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a13e5d13f79d558b5d353a98072ca8ca0e99da429467804de959aa8c83c9a004"
-dependencies = [
- "arrayvec",
- "grid 0.18.0",
+ "grid",
  "serde",
  "slotmap",
 ]
@@ -5553,6 +5432,25 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voxel_demo_app"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
+ "bevy-tnua",
+ "bevy-tnua-avian3d",
+ "bevy_egui",
+ "bevy_enhanced_input",
+ "bevy_hanabi",
+ "bevy_prng",
+ "bevy_rand",
+ "bevy_voxel_plugin",
+ "iyes_perf_ui",
+ "rand 0.9.2",
+ "tracing",
+]
 
 [[package]]
 name = "walkdir"
