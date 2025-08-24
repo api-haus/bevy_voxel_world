@@ -109,16 +109,6 @@ pub fn setup(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
 				),
 		]),
 	));
-
-	// Simple light aimed at the volume center
-	commands.spawn((
-		DirectionalLight {
-			illuminance: 4000.0,
-			shadows_enabled: true,
-			..Default::default()
-		},
-		Transform::from_translation(center + Vec3::new(64.0, 128.0, 64.0)).looking_at(center, Vec3::Y),
-	));
 }
 
 pub fn interact(

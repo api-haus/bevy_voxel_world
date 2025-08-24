@@ -12,6 +12,8 @@ use prelude::EnhancedInputPlugin;
 use std::path::{Path, PathBuf};
 
 use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin};
+mod atmosphere;
+mod camera;
 mod diag;
 mod fly_cam;
 
@@ -67,7 +69,15 @@ fn main() {
 			MaterialPlugin::<ExtendedMaterial<StandardMaterial, TriplanarExtension>>::default(),
 		))
 		.add_input_context::<fly_cam::FlyCamCtx>()
-		.add_systems(Startup, fly_cam::setup)
+		.add_systems(
+			Startup,
+			(
+				fly_cam::setup,
+				camera::setup_camera_rendering,
+				atmosphere::setup_atmosphere,
+			)
+				.chain(),
+		)
 		.add_systems(
 			Update,
 			(fly_cam::mouse_look, fly_cam::movement, fly_cam::interact),
