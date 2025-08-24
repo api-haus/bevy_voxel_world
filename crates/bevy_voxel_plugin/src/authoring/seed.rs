@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use tracing::{debug, info_span, trace};
 
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
+use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
 
 /// Simple integer hash mix (wyhash-inspired) for generating deterministic noise
 #[inline]
@@ -53,6 +53,7 @@ pub(crate) fn seed_random_spheres_sdf(
 			origin = ?desc.origin_cell
 	);
 	let _enter = span.enter();
+	info!(target: "vox", "seed_random_spheres_sdf: starting seeding for {} chunks", q_chunks.iter().count());
 	let vol_shape = ILVec3::new(
 		(desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
 		(desc.grid_dims.y * desc.chunk_core_dims.y) as i32,
@@ -196,4 +197,6 @@ pub(crate) fn seed_random_spheres_sdf(
 			trace!(target: "vox", "seed_chunk_enqueued entity={:?}", e);
 		}
 	}
+
+	info!(target: "vox", "seed_random_spheres_sdf: completed seeding, {} chunks queued for meshing", queue.inner.len());
 }

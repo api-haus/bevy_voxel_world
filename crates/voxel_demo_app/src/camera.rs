@@ -29,8 +29,9 @@ pub fn setup_camera_rendering(
 			// Proper exposure for sunlight
 			Exposure::SUNLIGHT,
 			// Tone mapping for better visual quality
-			Tonemapping::AcesFitted,
+			Tonemapping::TonyMcMapface,
 			// Natural bloom for sun and bright areas
+			#[cfg(not(target_os = "ios"))]
 			Bloom::NATURAL,
 		));
 	}

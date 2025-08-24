@@ -20,8 +20,10 @@ pub(crate) fn apply_remeshes(
 	mut q_chunk_tf: Query<(&super::VoxelChunk, &VoxelStorage, &mut Transform)>,
 ) {
 	let Some(render_mat) = render_mat else {
+		info!(target: "vox", "apply_remeshes: skipping - render material not ready");
 		return;
 	};
+	info!(target: "vox", "apply_remeshes: render material available");
 	for ev in evr.read() {
 		let span = info_span!(
 				"apply_mesh",
@@ -48,11 +50,13 @@ pub(crate) fn apply_remeshes(
 
 		let meshes_vec = buffer_to_meshes_per_material(&ev.buffer, vertex_colors.as_deref());
 		if meshes_vec.is_empty() {
+			info!(target: "vox", "apply_mesh: empty meshes_vec for entity {:?}", ev.entity);
 			continue;
 		}
 		let mesh = meshes_vec.into_iter().next().unwrap();
 		trace!("compute_aabb_begin");
-		let _ = mesh.compute_aabb();
+		let aabb = mesh.compute_aabb();
+		info!(target: "vox", "apply_mesh: mesh bounds {:?} for entity {:?}", aabb, ev.entity);
 		let mesh_handle = meshes.add(mesh);
 		let mesh_id = mesh_handle.id();
 
@@ -66,6 +70,7 @@ pub(crate) fn apply_remeshes(
 			let min = desc.origin_cell + offset - ILVec3::ONE;
 			transform.translation = Vec3::new(min.x as f32, min.y as f32, min.z as f32);
 
+			info!(target: "vox", "apply_mesh: adding mesh to entity {:?} at position {:?}", ev.entity, transform.translation);
 			commands.entity(ev.entity).insert((
 				Mesh3d(mesh_handle.clone()),
 				MeshMaterial3d(render_mat.handle.clone()),

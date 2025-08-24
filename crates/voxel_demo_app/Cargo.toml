@@ -3,8 +3,21 @@ name = "voxel_demo_app"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# Diagnostic UI feature - disabled by default on all platforms
+# Enable with: cargo run --features diagnostics_ui
+# Or for debug builds: RUSTFLAGS="--cfg feature=\"diagnostics_ui\"" cargo run
+diagnostics_ui = ["dep:iyes_perf_ui"]
+
+# Default features
+default = []
+
+
 [dependencies]
-bevy = { workspace = true, features = ["dynamic_linking"] }
+bevy = { workspace = true }
 avian3d = { workspace = true }
 bevy-tnua = { workspace = true }
 bevy-tnua-avian3d = { workspace = true }
@@ -15,5 +28,13 @@ bevy_egui = { workspace = true }
 bevy_prng = { workspace = true }
 bevy_rand = { workspace = true }
 rand = { workspace = true }
-iyes_perf_ui = { workspace = true }
+iyes_perf_ui = { workspace = true, optional = true }
 tracing = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+bevy_ios_iap = { version = "0.7.0" }
+wgpu = "26.0.1"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+#bevy = { workspace = true, features = ["dynamic_linking"] }
+bevy = { workspace = true }

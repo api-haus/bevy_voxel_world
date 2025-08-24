@@ -14,6 +14,7 @@ if [[ "$CONFIGURATION" != "Debug" ]]; then
 fi
 
 set -euvx
+PROFILE_DIR=$PROFILE
 
 # add homebrew bin path, as it's the most commonly used package manager on macOS
 # this is needed for cmake on apple arm processors as it's not available by default
@@ -58,19 +59,12 @@ for arch in $ARCHS; do
       fi
   esac
 
-  # Use LLVM-backed debug profile on hardware iOS to avoid Cranelift
-  CARGO_PROFILE_ARGS=
-  PROFILE_DIR=$PROFILE
-  if [[ -z "$RELFLAG" && "$TARGET" == "aarch64-apple-ios" ]]; then
-    CARGO_PROFILE_ARGS="--profile dev-llvm"
-    PROFILE_DIR="dev-llvm"
-  fi
+  # Build the Rust iOS static library for the current arch/target
+  cargo build $RELFLAG --lib --target $TARGET -p voxel_demo_app
 
-  cargo build $RELFLAG $CARGO_PROFILE_ARGS --features ios --target $TARGET --bin bevister
-
-  # Collect the executables
-  EXECUTABLES="$EXECUTABLES $DERIVED_FILE_DIR/cargo/$TARGET/$PROFILE_DIR/bevister"
+  # Collect the static libraries
+  EXECUTABLES="$EXECUTABLES $DERIVED_FILE_DIR/cargo/$TARGET/$PROFILE_DIR/libvoxel_demo_app.a"
 done
 
-# Combine executables, and place them at the output path excepted by Xcode
-lipo -create -output "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" $EXECUTABLES
+# Combine static libraries into a universal one in the built products dir
+lipo -create -output "$BUILT_PRODUCTS_DIR/libvoxel_demo_app.a" $EXECUTABLES

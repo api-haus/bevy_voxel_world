@@ -7,24 +7,44 @@ dotenv:
 tasks:
   default:
     desc: Run on connected iOS device by default
-    deps: [device]
+    deps: [ios:run]
 
-  device:
-    desc: Build, install, and run on connected iOS device
+  ios:run:
+    desc: Build, install, and run on first connected iOS device
     cmds:
-      - IOS_TARGETS=aarch64-apple-ios
-        xcodebuild
-        -scheme bevister
-        -configuration Debug
-        -derivedDataPath build
-        -destination 'generic/platform=iOS'
-        DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"
-        CODE_SIGN_STYLE="${CODE_SIGN_STYLE:-Automatic}"
-        CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Apple Development}"
-        PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER"
-        -allowProvisioningUpdates
-        -allowProvisioningDeviceRegistration &&
-        bash ./ios-src/open_xcode_and_build.sh
+      - bash ./ios-src/ios_run.sh device
+
+  ios:run:sim:
+    desc: Build, boot/create simulator if needed, and run on iOS Simulator
+    cmds:
+      - bash ./ios-src/ios_run.sh sim
+
+  ios:run:device:logs:
+    desc: Build and run on device with log streaming
+    cmds:
+      - |
+        # Get device UDID
+        UDID=$(xcrun xctrace list devices 2>/dev/null | grep -v Simulator | grep -Eo '\([0-9A-F-]{36}\)' | head -n1 | tr -d '()')
+        if [ -z "$UDID" ]; then
+          echo "No iOS device found"
+          exit 1
+        fi
+        # Build and run
+        bash ./ios-src/ios_run.sh device &
+        # Stream logs
+        sleep 5
+        xcrun devicectl device log stream --device "$UDID" | grep -E "(VoxelGame|vox)" --line-buffered
+
+  ios:run:sim:logs:
+    desc: Build and run on simulator with log streaming
+    cmds:
+      - |
+        # Build and run
+        bash ./ios-src/ios_run.sh sim &
+        # Wait a bit for app to start
+        sleep 10
+        # Stream logs from booted simulator
+        xcrun simctl spawn booted log stream --predicate 'processImagePath CONTAINS "VoxelGame"' --level debug
 
   clean:
     desc: Clean build artifacts
@@ -43,3 +63,33 @@ tasks:
     dir: /Volumes/Archive2TB/_dev/bevister
     cmds:
       - CARGO_TERM_COLOR=always RUST_TEST_THREADS=1 cargo test --manifest-path /Volumes/Archive2TB/_dev/bevister/Cargo.toml --workspace --all-features -- --nocapture
+
+  run:
+    desc: Run voxel demo app (no diagnostics)
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - cargo run -p voxel_demo_app
+
+  run:diag:
+    desc: Run voxel demo app with diagnostics UI enabled
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - cargo run -p voxel_demo_app --features diagnostics_ui
+
+  run:debug:
+    desc: Run voxel demo app in debug mode with diagnostics
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - cargo run -p voxel_demo_app --features diagnostics_ui
+
+  run:release:
+    desc: Run voxel demo app in release mode (no diagnostics)
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - cargo run -p voxel_demo_app --release
+
+  run:release:diag:
+    desc: Run voxel demo app in release mode with diagnostics
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - cargo run -p voxel_demo_app --release --features diagnostics_ui

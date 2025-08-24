@@ -3,6 +3,9 @@ use bevy::prelude::*;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
 
 pub(crate) fn spawn_volume_chunks(mut commands: Commands, desc: Res<super::VoxelVolumeDesc>) {
+	info!(target: "vox", "spawn_volume_chunks: creating volume with grid_dims={:?}, chunk_core_dims={:?}, origin={:?}", 
+		desc.grid_dims, desc.chunk_core_dims, desc.origin_cell);
+
 	let volume_entity = commands
 		.spawn((
 			Name::new("VoxelVolume"),
@@ -42,4 +45,7 @@ pub(crate) fn spawn_volume_chunks(mut commands: Commands, desc: Res<super::Voxel
 			}
 		}
 	}
+
+	let total_chunks = (grid.x * grid.y * grid.z) as usize;
+	info!(target: "vox", "spawn_volume_chunks: created {} chunks", total_chunks);
 }

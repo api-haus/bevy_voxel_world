@@ -1,7 +1,7 @@
-use bevy::prelude::{default, Commands, Transform};
-use bevy::pbr::{CascadeShadowConfigBuilder, DirectionalLight};
-use bevy::pbr::light_consts::lux;
 use bevy::math::Vec3;
+use bevy::pbr::light_consts::lux;
+use bevy::pbr::{CascadeShadowConfigBuilder, DirectionalLight};
+use bevy::prelude::{default, Commands, Transform};
 
 /// Sets up atmospheric scattering and skybox for realistic sky rendering
 pub fn setup_atmosphere(mut commands: Commands) {

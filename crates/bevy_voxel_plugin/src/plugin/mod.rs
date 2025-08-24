@@ -4,10 +4,8 @@ use ilattice::prelude::{IVec3, UVec3};
 
 mod apply_mesh;
 mod editing;
-mod materials;
+mod rendering_materials;
 mod scheduler;
-#[cfg(test)]
-mod tests;
 pub mod tracing;
 mod volume_spawn;
 
@@ -17,12 +15,14 @@ mod authoring {
 }
 use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
-pub use materials::TriplanarExtension;
-pub(crate) use materials::{
-	init_texture_loading, init_voxel_material_when_ready, VoxelRenderMaterial,
+pub use rendering_materials::TriplanarExtension;
+pub(crate) use rendering_materials::{
+	VoxelRenderMaterial,
+	// init_texture_loading, init_voxel_material_when_ready, // Temporarily disabled for iOS debugging
+	init_simple_material,
 };
 pub(crate) use scheduler::{
-	drain_queue_and_spawn_jobs, pump_remesh_results, RemeshBudget, RemeshQueue,
+	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
 pub(crate) use tracing::telemetry::VoxelTelemetry;
 use tracing::telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
@@ -119,7 +119,9 @@ impl Plugin for VoxelPlugin {
 			.add_systems(
 				Startup,
 				(
-					init_texture_loading,
+					// Temporarily use simple material for iOS debugging
+					// init_texture_loading,
+					init_simple_material,
 					volume_spawn::spawn_volume_chunks,
 					authoring::seed_random_spheres_sdf,
 				)
@@ -128,7 +130,7 @@ impl Plugin for VoxelPlugin {
 			.add_systems(
 				Update,
 				(
-					init_voxel_material_when_ready,
+					// init_voxel_material_when_ready,
 					editing::apply_edit_events.in_set(VoxelSet::Editing),
 					update_telemetry_begin
 						.in_set(VoxelSet::Schedule)
