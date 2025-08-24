@@ -6,7 +6,13 @@ use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{
 	AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
+
+#[derive(Resource)]
+pub(crate) struct LoadingTexture {
+	is_loaded: bool,
+	handle: Handle<Image>,
+}
 
 #[derive(Resource, Clone)]
 pub(crate) struct VoxelRenderMaterial {
@@ -78,36 +84,51 @@ pub(crate) fn init_voxel_material_when_ready(
 	mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, TriplanarExtension>>>,
 	mut images: ResMut<Assets<Image>>,
 	asset_server: Res<AssetServer>,
+	mut loading_texture: ResMut<LoadingTexture>,
 	maybe_existing: Option<Res<VoxelRenderMaterial>>,
 ) {
 	if maybe_existing.is_some() {
 		return;
 	}
-	let stacked: Handle<Image> = asset_server.load("generated/albedo_array_stacked.png");
-	if let Some(img) = images.get_mut(&stacked) {
-		debug!(target: "vox", "voxel_mat_image_ready size=({}x{}), format={:?}", img.texture_descriptor.size.width, img.texture_descriptor.size.height, img.texture_descriptor.format);
-		let width = img.texture_descriptor.size.width.max(1);
-		let height = img.texture_descriptor.size.height;
-		let layers = (height / width).max(1);
-		img.reinterpret_stacked_2d_as_array(layers);
-		let handle = materials.add(ExtendedMaterial {
-			base: StandardMaterial {
-				base_color: Color::WHITE,
-				base_color_texture: None,
-				perceptual_roughness: 0.8,
-				metallic: 0.0,
-				..Default::default()
-			},
-			extension: TriplanarExtension {
-				albedo_array: stacked.clone(),
-				tiling_scale: 0.08,
-				albedo_layer_count: layers,
-				debug_mat_vis: true,
-			},
-		});
-		commands.insert_resource(VoxelRenderMaterial { handle });
-		info!(target: "vox", "voxel_mat_created layers={}", layers);
-	} else {
-		warn!(target: "vox", "voxel_mat_image_not_ready (asset not yet loaded)");
+
+	if loading_texture.is_loaded
+		|| !asset_server
+			.load_state(loading_texture.handle.id())
+			.is_loaded()
+	{
+		return;
 	}
+	loading_texture.is_loaded = true;
+
+	let image = images.get_mut(&loading_texture.handle).unwrap();
+	debug!(target: "vox", "voxel_mat_image_ready size=({}x{}), format={:?}", image.texture_descriptor.size.width, image.texture_descriptor.size.height, image.texture_descriptor.format);
+	let width = image.texture_descriptor.size.width.max(1);
+	let height = image.texture_descriptor.size.height;
+	let layers = (height / width).max(1);
+	image.reinterpret_stacked_2d_as_array(layers);
+
+	let handle = materials.add(ExtendedMaterial {
+		base: StandardMaterial {
+			base_color: Color::WHITE,
+			base_color_texture: None,
+			perceptual_roughness: 0.8,
+			metallic: 0.0,
+			..Default::default()
+		},
+		extension: TriplanarExtension {
+			albedo_array: loading_texture.handle.clone(),
+			tiling_scale: 0.08,
+			albedo_layer_count: layers,
+			debug_mat_vis: true,
+		},
+	});
+	commands.insert_resource(VoxelRenderMaterial { handle });
+	info!(target: "vox", "voxel_mat_created layers={}", layers);
+}
+
+pub(crate) fn init_texture_loading(mut commands: Commands, asset_server: Res<AssetServer>) {
+	commands.insert_resource(LoadingTexture {
+		is_loaded: false,
+		handle: asset_server.load("generated/albedo_array_stacked.png"),
+	});
 }

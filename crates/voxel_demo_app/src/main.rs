@@ -9,12 +9,32 @@ use bevy_enhanced_input::prelude::InputContextAppExt;
 use bevy_prng::WyRand;
 use bevy_rand::plugin::EntropyPlugin;
 use prelude::EnhancedInputPlugin;
+use std::path::{Path, PathBuf};
 
 use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin};
 mod diag;
 mod fly_cam;
 
 fn main() {
+	// Resolve assets root robustly
+	let assets_root: PathBuf = {
+		let mut candidates: Vec<PathBuf> = Vec::new();
+		if let Ok(env_override) = std::env::var("BEVISTER_ASSETS") {
+			candidates.push(PathBuf::from(env_override));
+		}
+		// Workspace root when running from repo root
+		candidates.push(PathBuf::from("assets"));
+		// Relative to crate dir when running with crate CWD
+		let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+		candidates.push(crate_dir.join("../../assets"));
+		candidates.push(crate_dir.join("../assets"));
+		candidates.push(crate_dir.join("assets"));
+		candidates
+			.into_iter()
+			.find(|p| p.exists())
+			.unwrap_or_else(|| PathBuf::from("assets"))
+	};
+
 	App::new()
 		.add_plugins((
 			DefaultPlugins
@@ -35,7 +55,7 @@ fn main() {
 					..default()
 				})
 				.set(AssetPlugin {
-					file_path: "../../assets".into(),
+					file_path: assets_root.display().to_string(),
 					..Default::default()
 				}),
 			PhysicsPlugins::default(),

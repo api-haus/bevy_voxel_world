@@ -7,7 +7,7 @@ dotenv:
 tasks:
   default:
     desc: Run on connected iOS device by default
-    deps: [ device ]
+    deps: [device]
 
   device:
     desc: Build, install, and run on connected iOS device
@@ -31,3 +31,15 @@ tasks:
     cmds:
       - rm -r build || true
       - cargo clean
+
+  test:plugin:
+    desc: Run bevy_voxel_plugin tests from workspace root with output
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - CARGO_TERM_COLOR=always RUST_TEST_THREADS=1 cargo test --manifest-path /Volumes/Archive2TB/_dev/bevister/Cargo.toml -p bevy_voxel_plugin -- --nocapture
+
+  test:all:
+    desc: Run all workspace tests from workspace root
+    dir: /Volumes/Archive2TB/_dev/bevister
+    cmds:
+      - CARGO_TERM_COLOR=always RUST_TEST_THREADS=1 cargo test --manifest-path /Volumes/Archive2TB/_dev/bevister/Cargo.toml --workspace --all-features -- --nocapture

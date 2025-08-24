@@ -6,6 +6,8 @@ mod apply_mesh;
 mod editing;
 mod materials;
 mod scheduler;
+#[cfg(test)]
+mod tests;
 pub mod tracing;
 mod volume_spawn;
 
@@ -16,8 +18,9 @@ mod authoring {
 use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
-pub(crate) use materials::VoxelRenderMaterial;
-pub(crate) use materials::init_voxel_material_when_ready;
+pub(crate) use materials::{
+	VoxelRenderMaterial, init_texture_loading, init_voxel_material_when_ready,
+};
 pub(crate) use scheduler::{
 	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
@@ -116,6 +119,7 @@ impl Plugin for VoxelPlugin {
 			.add_systems(
 				Startup,
 				(
+					init_texture_loading,
 					volume_spawn::spawn_volume_chunks,
 					authoring::seed_random_spheres_sdf,
 				)
