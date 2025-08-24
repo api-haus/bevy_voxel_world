@@ -14,3 +14,4 @@ bevy_rand = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
 iyes_perf_ui = { workspace = true }
+thiserror = "1.0"

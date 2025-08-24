@@ -1,17 +1,17 @@
 {
-  "layers": [
-    "free_stylized_textures/cliff_rocks_02_1k/cliff_rocks_02_baseColor_1k.png",
-    "free_stylized_textures/rock_01_1k/rock_01_color_1k.png",
-    "free_stylized_textures/metal_02_1k/metal_02_color_1k.png",
-    "free_stylized_textures/metal_03_1k/metal_03_color_1k.png",
-    "free_stylized_textures/metal_roof_01_1k/metal_roof_01_color_1k.png",
-    "free_stylized_textures/ground_01_1k/ground_01_color_1k.png",
-    "free_stylized_textures/grass_01_1k/grass_01_color_1k.png",
-    "free_stylized_textures/concrete_wall_10_1k/concrete_wall_10_basecolor_1k.png",
-    "free_stylized_textures/sand_04_1k/sand_04_color_1k.png",
-    "free_stylized_textures/ground_02_1k/ground_02_color_1k.png",
-    "free_stylized_textures/grass_02_1k/grass_02_base_1k.png",
-    "free_stylized_textures/desert_rocks_01_1k/desert_rocks_01_color_1k.png",
-    "free_stylized_textures/lava_rocks_01_1k/lava_rocks_01_color_1k.png"
-  ]
+	"layers": [
+		"free_stylized_textures/cliff_rocks_02_1k/cliff_rocks_02_baseColor_1k.png",
+		"free_stylized_textures/rock_01_1k/rock_01_color_1k.png",
+		"free_stylized_textures/metal_02_1k/metal_02_color_1k.png",
+		"free_stylized_textures/metal_03_1k/metal_03_color_1k.png",
+		"free_stylized_textures/metal_roof_01_1k/metal_roof_01_color_1k.png",
+		"free_stylized_textures/ground_01_1k/ground_01_color_1k.png",
+		"free_stylized_textures/grass_01_1k/grass_01_color_1k.png",
+		"free_stylized_textures/concrete_wall_10_1k/concrete_wall_10_basecolor_1k.png",
+		"free_stylized_textures/sand_04_1k/sand_04_color_1k.png",
+		"free_stylized_textures/ground_02_1k/ground_02_color_1k.png",
+		"free_stylized_textures/grass_02_1k/grass_02_base_1k.png",
+		"free_stylized_textures/desert_rocks_01_1k/desert_rocks_01_color_1k.png",
+		"free_stylized_textures/lava_rocks_01_1k/lava_rocks_01_color_1k.png"
+	]
 }

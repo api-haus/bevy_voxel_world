@@ -19,10 +19,10 @@ use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use materials::TriplanarExtension;
 pub(crate) use materials::{
-	VoxelRenderMaterial, init_texture_loading, init_voxel_material_when_ready,
+	init_texture_loading, init_voxel_material_when_ready, VoxelRenderMaterial,
 };
 pub(crate) use scheduler::{
-	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
+	drain_queue_and_spawn_jobs, pump_remesh_results, RemeshBudget, RemeshQueue,
 };
 pub(crate) use tracing::telemetry::VoxelTelemetry;
 use tracing::telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};

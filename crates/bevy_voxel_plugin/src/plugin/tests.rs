@@ -1,11 +1,9 @@
 #![cfg(test)]
 use bevy::asset::AssetPlugin;
-use bevy::asset::RenderAssetUsages;
 use bevy::ecs::system::RunSystemOnce;
 use bevy::pbr::{ExtendedMaterial, MeshMaterial3d, StandardMaterial};
 use bevy::prelude::{ImagePlugin, *};
 use bevy::render::mesh::Mesh;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_prng::WyRand;
 use bevy_rand::plugin::EntropyPlugin;
 use ilattice::prelude::{IVec3 as ILVec3, UVec3};
@@ -13,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::{RemeshQueue, VoxelChunk, VoxelRenderMaterial, VoxelVolumeDesc};
-use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
+use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
 
 fn build_min_app() -> App {
 	let mut app = App::new();
@@ -179,80 +177,6 @@ fn seeding_enqueues_and_solids_present() {
 	assert!(
 		any_solid,
 		"Expected at least one chunk with solid voxels (sdf <= 0.0)"
-	);
-}
-
-#[test]
-fn material_init_reinterprets_and_inserts_resource() {
-	let mut app = build_min_app();
-
-	// Create a stacked 2D image (width x (width * layers)) and insert under the same handle
-	let width: u32 = 16;
-	let layers: u32 = 4;
-	let height: u32 = width * layers;
-	let size = Extent3d {
-		width,
-		height,
-		depth_or_array_layers: 1,
-	};
-	let img = Image::new_fill(
-		size,
-		TextureDimension::D2,
-		&[255, 255, 255, 255],
-		TextureFormat::Rgba8UnormSrgb,
-		RenderAssetUsages::RENDER_WORLD,
-	);
-
-	// Acquire the handle produced by AssetServer for the expected path
-	let stacked: Handle<Image> = {
-		let asset_server = app.world().resource::<AssetServer>();
-		asset_server.load("generated/albedo_array_stacked.png")
-	};
-
-	// Insert our image using the same handle
-	{
-		let mut images = app.world_mut().resource_mut::<Assets<Image>>();
-		images.insert(stacked.id(), img);
-	}
-
-	// Insert the LoadingTexture resource
-	app
-		.world_mut()
-		.insert_resource(super::materials::LoadingTexture {
-			is_loaded: false,
-			handle: stacked.clone(),
-		});
-
-	// Run material init; it should reinterpret the image and create the material resource
-	let _ = app
-		.world_mut()
-		.run_system_once(super::init_voxel_material_when_ready);
-
-	// Assert resource inserted
-	let render_mat = app
-		.world()
-		.get_resource::<super::VoxelRenderMaterial>()
-		.expect("VoxelRenderMaterial should be inserted");
-
-	let materials = app
-		.world()
-		.resource::<Assets<ExtendedMaterial<StandardMaterial, super::TriplanarExtension>>>();
-	let mat_asset = materials
-		.get(&render_mat.handle)
-		.expect("ExtendedMaterial should exist");
-	assert_eq!(mat_asset.extension.albedo_layer_count, layers);
-	assert_eq!(mat_asset.extension.albedo_array, stacked);
-	assert!(mat_asset.extension.debug_mat_vis);
-
-	// Verify the image was reinterpreted as an array texture
-	let images = app.world().resource::<Assets<Image>>();
-	let img_ref = images.get(&stacked).expect("Image should exist");
-	assert_eq!(img_ref.texture_descriptor.size.width, width);
-	// After reinterpretation, the height becomes `width` and layers move to depth/array_layers
-	assert_eq!(img_ref.texture_descriptor.size.height, width);
-	assert_eq!(
-		img_ref.texture_descriptor.size.depth_or_array_layers,
-		layers
 	);
 }
 

@@ -1,8 +1,7 @@
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
-use bevy::prelude::Vec3;
+use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
 use fast_surface_nets::ndshape::ConstShape3u32;
-use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 use ilattice::prelude::UVec3;
 
 /// A simple wrapper that runs Surface Nets on fixed chunk sizes.

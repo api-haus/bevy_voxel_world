@@ -9,7 +9,6 @@ use tracing::{info_span, trace};
 
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions_arrays;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
-use ilattice::prelude::UVec3;
 
 // Budget for remeshing work per frame
 #[derive(Resource, Debug, Clone, Copy)]

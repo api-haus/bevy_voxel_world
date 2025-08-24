@@ -3,7 +3,6 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 #[derive(Serialize)]
 struct ArrayMeta {

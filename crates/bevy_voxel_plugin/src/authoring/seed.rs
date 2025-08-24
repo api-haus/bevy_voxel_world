@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use tracing::{debug, info_span, trace};
 
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
+use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
 
 /// Simple integer hash mix (wyhash-inspired) for generating deterministic noise
 #[inline]

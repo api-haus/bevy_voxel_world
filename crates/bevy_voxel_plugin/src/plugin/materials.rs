@@ -10,8 +10,8 @@ use tracing::{debug, info};
 
 #[derive(Resource)]
 pub(crate) struct LoadingTexture {
-	is_loaded: bool,
-	handle: Handle<Image>,
+	pub is_loaded: bool,
+	pub handle: Handle<Image>,
 }
 
 #[derive(Resource, Clone)]
@@ -117,9 +117,9 @@ pub(crate) fn init_voxel_material_when_ready(
 		},
 		extension: TriplanarExtension {
 			albedo_array: loading_texture.handle.clone(),
-			tiling_scale: 0.08,
+			tiling_scale: 0.1,
 			albedo_layer_count: layers,
-			debug_mat_vis: true,
+			debug_mat_vis: false,
 		},
 	});
 	commands.insert_resource(VoxelRenderMaterial { handle });
