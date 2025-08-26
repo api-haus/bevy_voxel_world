@@ -113,18 +113,3 @@ pub(crate) fn apply_remeshes(
 		}
 	}
 }
-
-/// Perform a synchronous remesh for all chunks and apply meshes + colliders.
-/// This is intended to run once at Startup after seeding so colliders exist before gameplay.
-#[allow(dead_code)]
-pub(crate) fn initial_sync_remesh_and_apply(
-	desc: Res<super::VoxelVolumeDesc>,
-	render_mat: Option<Res<super::VoxelRenderMaterial>>,
-	telemetry: ResMut<super::VoxelTelemetry>,
-	meshes: ResMut<Assets<Mesh>>,
-	commands: Commands,
-	q_chunk: Query<(Entity, &super::VoxelChunk, &VoxelStorage, &mut Transform)>,
-) {
-	// Deprecated: replaced by async queued flow governed by VoxelLoadingState.
-	let _ = (desc, render_mat, telemetry, meshes, commands, q_chunk);
-}

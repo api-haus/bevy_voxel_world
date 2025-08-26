@@ -22,7 +22,6 @@ pub struct FlyCamTuning {
 	pub boost_multiplier: f32,
 }
 
-
 impl Default for FlyCamTuning {
 	fn default() -> Self {
 		Self {
@@ -33,13 +32,11 @@ impl Default for FlyCamTuning {
 	}
 }
 
-
 #[derive(Component, Default)]
 pub struct FlyCam {
 	pub yaw: f32,
 	pub pitch: f32,
 }
-
 
 #[derive(InputAction)]
 #[action_output(Vec3)]
@@ -82,7 +79,6 @@ pub enum FlyCamSet {
 	Interact,
 }
 
-
 impl Plugin for FlyCamPlugin {
 	fn build(&self, app: &mut App) {
 		app
@@ -107,7 +103,6 @@ impl Plugin for FlyCamPlugin {
 			);
 	}
 }
-
 
 pub fn setup(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
 	commands.insert_resource(FlyCamTuning::default());
@@ -164,7 +159,6 @@ pub fn setup(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
 	));
 }
 
-
 pub fn interact(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
@@ -174,16 +168,22 @@ pub fn interact(
 	q_dig: Query<&Action<Dig>>,
 	q_shoot: Query<&Action<SpawnBall>>,
 	q_place: Query<&Action<Place>>,
+	q_player: Query<Entity, With<crate::player::components::Player>>,
 	mut spatial_query: avian::SpatialQuery,
 ) {
 	for (xf, actions) in q_cam.iter() {
 		let cam_pos = xf.translation();
 		let forward = -xf.compute_transform().forward();
 
+		// Exclude the player entity from spatial queries to avoid self-hits
+		let filter = if let Ok(player_ent) = q_player.get_single() {
+			avian::SpatialQueryFilter::default().with_excluded_entities([player_ent])
+		} else {
+			avian::SpatialQueryFilter::default()
+		};
+
 		for ent in actions.iter() {
-
 			if let Ok(d) = q_dig.get(ent) {
-
 				if **d {
 					let dir_vec = -forward.normalize_or_zero();
 					let max_t = 100.0;
@@ -191,13 +191,9 @@ pub fn interact(
 					// Update and cast ray via Avian3D SpatialQuery; fall back to max distance if nothing hit
 					spatial_query.update_pipeline();
 
-					if let Some(hit) = spatial_query.cast_ray(
-						cam_pos,
-						Dir3::new_unchecked(dir_vec),
-						max_t,
-						true,
-						&avian::SpatialQueryFilter::default(),
-					) {
+					if let Some(hit) =
+						spatial_query.cast_ray(cam_pos, Dir3::new_unchecked(dir_vec), max_t, true, &filter)
+					{
 						hit_point = cam_pos + dir_vec * hit.distance;
 					}
 
@@ -210,20 +206,15 @@ pub fn interact(
 			}
 
 			if let Ok(p) = q_place.get(ent) {
-
 				if **p {
 					let dir_vec = -forward.normalize_or_zero();
 					let max_t = 100.0;
 					let mut hit_point = cam_pos + dir_vec * max_t;
 					spatial_query.update_pipeline();
 
-					if let Some(hit) = spatial_query.cast_ray(
-						cam_pos,
-						Dir3::new_unchecked(dir_vec),
-						max_t,
-						true,
-						&avian::SpatialQueryFilter::default(),
-					) {
+					if let Some(hit) =
+						spatial_query.cast_ray(cam_pos, Dir3::new_unchecked(dir_vec), max_t, true, &filter)
+					{
 						hit_point = cam_pos + dir_vec * hit.distance;
 					}
 
@@ -236,7 +227,6 @@ pub fn interact(
 			}
 
 			if let Ok(s) = q_shoot.get(ent) {
-
 				if **s {
 					let radius = 0.5;
 					let start = cam_pos - forward * 2.0;
@@ -263,7 +253,6 @@ pub fn interact(
 	}
 }
 
-
 pub fn mouse_look(
 	mut q_cam: Query<(&mut Transform, &mut FlyCam, &Actions<FlyCamCtx>)>,
 	q_look: Query<&Action<Look2D>>,
@@ -275,7 +264,6 @@ pub fn mouse_look(
 		let mut aiming = false;
 
 		for ent in actions.iter() {
-
 			if let Ok(v) = q_look.get(ent) {
 				look = **v;
 			}
@@ -289,7 +277,6 @@ pub fn mouse_look(
 			continue;
 		}
 
-
 		fly.yaw -= look.x * cfg.look_sensitivity * 0.01;
 		fly.pitch -= look.y * cfg.look_sensitivity * 0.01;
 		fly.pitch = fly.pitch.clamp(-1.54, 1.54);
@@ -299,7 +286,6 @@ pub fn mouse_look(
 		transform.rotation = yaw_rot * pitch_rot;
 	}
 }
-
 
 pub fn movement(
 	time: Res<Time>,
@@ -313,7 +299,6 @@ pub fn movement(
 		let mut boosting = false;
 
 		for ent in actions.iter() {
-
 			if let Ok(v) = q_move.get(ent) {
 				move_vec = **v;
 			}

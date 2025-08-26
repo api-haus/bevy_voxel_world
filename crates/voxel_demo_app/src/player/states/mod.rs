@@ -48,7 +48,6 @@ pub fn resolve_transitions(
 	mut next: ResMut<NextState<PlayerMoveState>>,
 ) {
 	let intents: Vec<_> = ev_intents.read().cloned().collect();
-
 	if intents.is_empty() {
 		return;
 	}
@@ -106,6 +105,7 @@ impl Plugin for PlayerStatesPlugin {
 				FixedUpdate,
 				resolve_transitions.after(PlayerStatesSet::Decide),
 			);
+		debug!("init player states plugin");
 
 		// Sensors that feed transitions (e.g., climb contact detection)
 		app.add_systems(

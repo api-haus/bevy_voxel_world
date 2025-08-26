@@ -2,11 +2,13 @@ use bevy::prelude::*;
 
 use bevy_voxel_plugin::plugin::{EditOp, VoxelEditEvent};
 
+use leafwing_abilities::prelude::*;
 use leafwing_input_manager::prelude::*;
 
 use crate::player::actions::PlayerAction;
 
-use crate::player::components::{Player, PlayerDimensions, PunchCooldown};
+use crate::player::abilities::PlayerAbility;
+use crate::player::components::{Player, PlayerDimensions};
 
 use super::visualize::PunchGizmo;
 
@@ -18,23 +20,19 @@ pub fn punch_attack(
 			&GlobalTransform,
 			&Player,
 			&PlayerDimensions,
-			&mut PunchCooldown,
+			&mut CooldownState<PlayerAbility>,
 		),
 		With<Player>,
 	>,
 	q_actions: Query<&ActionState<PlayerAction>, With<Player>>,
 	mut commands: Commands,
-	time: Res<Time>,
 ) {
-	let Ok((player_xf, player, dims, mut cooldown)) = q_player.single_mut() else {
+	let Ok((player_xf, player, dims, mut ability_cds)) = q_player.single_mut() else {
 		return;
 	};
 	let Ok(actions) = q_actions.single() else {
 		return;
 	};
-
-	// Tick cooldown each frame
-	cooldown.0.tick(time.delta());
 
 	let pressed = actions.pressed(&PlayerAction::Punch);
 	let just = actions.just_pressed(&PlayerAction::Punch);
@@ -65,8 +63,10 @@ pub fn punch_attack(
 	let pos = player_xf.translation();
 	let forward = player.facing.normalize_or_zero();
 
-	if just || (pressed && cooldown.0.finished()) {
-		fire(&mut evw_dig, &mut commands, pos, forward, up);
-		cooldown.0.reset();
+	if just || pressed {
+		if ability_cds.ready(&PlayerAbility::Punch).is_ok() {
+			fire(&mut evw_dig, &mut commands, pos, forward, up);
+			let _ = ability_cds.trigger(&PlayerAbility::Punch);
+		}
 	}
 }

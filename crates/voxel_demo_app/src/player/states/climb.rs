@@ -52,6 +52,9 @@ pub fn detect_climbable(
 
 	spatial_query.update_pipeline();
 
+	// Exclude the player entity from spatial queries to avoid self-hits
+	let filter = avian::SpatialQueryFilter::default().with_excluded_entities([ent]);
+
 	let mut contact: Option<ClimbContact> = None;
 	let mut best: Option<(Vec3, f32)> = None;
 
@@ -63,7 +66,7 @@ pub fn detect_climbable(
 			Dir3::new_unchecked(move_dir),
 			max_dist,
 			true,
-			&avian::SpatialQueryFilter::default(),
+			&filter,
 		) {
 			let hit_dist = hit.distance.min(max_dist);
 			let n = hit.normal.normalize_or_zero();
@@ -101,6 +104,8 @@ pub fn detect_climbable(
 				_gizmos.arrow(start, end, col);
 				_gizmos.arrow(end, end + n * 0.4, Color::srgb(0.9, 0.9, 0.2));
 			}
+		} else {
+			debug!("climb: no hit");
 		}
 	}
 

@@ -44,29 +44,19 @@ pub struct ClimbConfig {
 	pub down_speed: f32,
 	pub lateral_speed: f32,
 	pub stick_inward_speed: f32,
-	#[allow(dead_code)]
-	pub max_wall_angle_from_vertical_deg: f32,
 }
 
 impl Default for ClimbConfig {
 	fn default() -> Self {
 		Self {
-			detect_distance: 12.0,
-			engage_distance: 0.45,
+			detect_distance: 4.0,
+			engage_distance: 4.0,
 			up_speed: 3.5,
 			down_speed: 3.0,
 			lateral_speed: 2.0,
 			stick_inward_speed: 1.0,
-			max_wall_angle_from_vertical_deg: 30.0,
 		}
 	}
 }
 
-#[derive(Component)]
-pub struct PunchCooldown(pub Timer);
-
-impl Default for PunchCooldown {
-	fn default() -> Self {
-		Self(Timer::from_seconds(0.25, TimerMode::Repeating))
-	}
-}
+// Removed: punch cooldown is handled by `leafwing_abilities` CooldownState

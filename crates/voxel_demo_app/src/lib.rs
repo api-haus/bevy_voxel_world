@@ -71,7 +71,8 @@ pub fn run() {
 			.unwrap_or_else(|| PathBuf::from("assets"))
 	};
 
-	let log_filter = "wgpu=error,bevy_render=info,bevy_ecs=trace,vox=trace".to_string();
+	let log_filter =
+		"wgpu=error,bevy_render=info,bevy_ecs=trace,vox=trace,voxel_demo_app=debug".to_string();
 
 	let mut app = App::new();
 	app.add_plugins({

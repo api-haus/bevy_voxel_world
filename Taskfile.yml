@@ -6,8 +6,8 @@ dotenv:
 
 tasks:
   default:
-    desc: Run on connected iOS device by default
-    deps: [ios:run]
+    desc: Run voxel demo app
+    deps: [run]
 
   ios:run:
     desc: Build, install, and run on first connected iOS device

@@ -12,14 +12,18 @@ pub enum PlayerAbility {
 }
 
 impl PlayerAbility {
-	#[allow(dead_code)]
+	pub fn cooldowns() -> CooldownState<PlayerAbility> {
+		let mut cooldowns = CooldownState::default();
+		cooldowns.set(PlayerAbility::Punch, Cooldown::from_secs(0.25));
+		cooldowns
+	}
+
 	pub fn abilities_bundle() -> AbilitiesBundle<PlayerAbility> {
-		// No cooldowns/charges yet; defaults are fine
 		AbilitiesBundle::<PlayerAbility> {
-			cooldowns: Default::default(),
+			cooldowns: Self::cooldowns(),
 			charges: Default::default(),
 		}
 	}
 }
 
-// No bridging system yet; we activate punch directly in gameplay for now.
+// Bridging: punches are gated and triggered via `leafwing_abilities`.
