@@ -6,7 +6,7 @@ pub fn attach_player_visor(
 	commands: &mut Commands,
 	parent: Entity,
 	meshes: &mut ResMut<Assets<Mesh>>,
-	materials: &mut ResMut<Assets<StandardMaterial>>,
+	_materials: &mut ResMut<Assets<StandardMaterial>>,
 	height: f32,
 	radius: f32,
 	material: Handle<StandardMaterial>,

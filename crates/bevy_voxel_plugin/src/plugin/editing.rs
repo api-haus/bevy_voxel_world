@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use ilattice::prelude::IVec3 as ILVec3;
 
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
+use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
 
 #[derive(Clone, Copy, Debug)]
 pub enum EditOp {
@@ -25,7 +25,7 @@ pub(crate) fn apply_edit_events(
 	q_volume_xf: Query<&GlobalTransform, With<super::VoxelVolume>>,
 ) {
 	for ev in evr.read() {
-		let center = if let Ok(vol_xf) = q_volume_xf.get_single() {
+		let center = if let Ok(vol_xf) = q_volume_xf.single() {
 			let to_local = vol_xf.compute_transform().compute_matrix().inverse();
 			to_local.transform_point3(ev.center_world)
 		} else {

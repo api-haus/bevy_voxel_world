@@ -23,6 +23,11 @@ use bevy_ios_iap::IosIapPlugin;
 mod ios_mobile;
 
 /// C ABI entrypoint for iOS launcher
+///
+/// # Safety
+/// This function is called from the iOS runtime and must be `extern "C"`.
+/// It performs engine initialization and runs the app; it should only be called once
+/// per process and assumes the process was prepared for a Bevy app run.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_main() {
 	run();

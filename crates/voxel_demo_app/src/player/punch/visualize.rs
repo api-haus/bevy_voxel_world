@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 
 #[derive(Component)]
+#[cfg_attr(not(feature = "debug_gizmos"), allow(dead_code))]
 pub struct Lifetime(pub Timer);
 
 #[derive(Component)]
+#[cfg_attr(not(feature = "debug_gizmos"), allow(dead_code))]
 pub struct PunchGizmo {
 	pub origin: Vec3,
 	pub tip: Vec3,
@@ -34,6 +36,8 @@ impl PunchGizmo {
 }
 
 /// Draw punch gizmos and remove them after their lifetime expires.
+#[cfg(feature = "debug_gizmos")]
+#[cfg(feature = "debug_gizmos")]
 pub fn draw_and_cleanup_punch_gizmos(
 	mut commands: Commands,
 	time: Res<Time>,
@@ -47,7 +51,7 @@ pub fn draw_and_cleanup_punch_gizmos(
 		}
 		lifetime.0.tick(time.delta());
 		if lifetime.0.finished() {
-			commands.entity(ent).despawn_recursive();
+			commands.entity(ent).despawn();
 		}
 	}
 }

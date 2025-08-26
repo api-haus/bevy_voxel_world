@@ -1,3 +1,4 @@
+use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 // no gamepad mapping for movement yet; only WASD
@@ -11,6 +12,7 @@ pub enum PlayerAction {
 	Jump,
 	Boost,
 	Punch,
+	ToggleDebugFly,
 }
 
 pub fn default_input_map() -> InputMap<PlayerAction> {
@@ -22,7 +24,13 @@ pub fn default_input_map() -> InputMap<PlayerAction> {
 	map.insert(PlayerAction::MoveBack, KeyCode::KeyS);
 	// Jump / Boost / Punch
 	map.insert(PlayerAction::Jump, KeyCode::Space);
-	map.insert(PlayerAction::Boost, KeyCode::ControlLeft);
-	map.insert(PlayerAction::Punch, KeyCode::KeyE);
+	map.insert(PlayerAction::Boost, KeyCode::ShiftLeft);
+	map.insert(PlayerAction::Punch, MouseButton::Left);
+	map.insert(PlayerAction::ToggleDebugFly, KeyCode::KeyZ);
+	// Gamepad chord: SELECT + START toggles debug fly
+	map.insert(
+		PlayerAction::ToggleDebugFly,
+		ButtonlikeChord::new([GamepadButton::Select, GamepadButton::Start]),
+	);
 	map
 }

@@ -10,6 +10,7 @@ pub enum PlayerAbility {
 }
 
 impl PlayerAbility {
+	#[allow(dead_code)]
 	pub fn abilities_bundle() -> AbilitiesBundle<PlayerAbility> {
 		// No cooldowns/charges yet; defaults are fine
 		AbilitiesBundle::<PlayerAbility> {

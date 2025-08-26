@@ -1,3 +1,4 @@
+use crate::player::state::PlayerMoveState;
 use avian3d::prelude as avian;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
@@ -84,9 +85,15 @@ impl Plugin for FlyCamPlugin {
 			.add_systems(
 				Update,
 				(
-					mouse_look.in_set(FlyCamSet::Input),
-					movement.in_set(FlyCamSet::Move),
-					interact.in_set(FlyCamSet::Interact),
+					mouse_look
+						.in_set(FlyCamSet::Input)
+						.run_if(in_state(PlayerMoveState::DebugFly)),
+					movement
+						.in_set(FlyCamSet::Move)
+						.run_if(in_state(PlayerMoveState::DebugFly)),
+					interact
+						.in_set(FlyCamSet::Interact)
+						.run_if(in_state(PlayerMoveState::DebugFly)),
 				),
 			);
 	}

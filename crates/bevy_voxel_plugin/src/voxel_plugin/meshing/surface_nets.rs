@@ -1,7 +1,7 @@
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
+use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
 use fast_surface_nets::ndshape::ConstShape3u32;
-use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
+use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
 use ilattice::prelude::UVec3;
 
 /// A simple wrapper that runs Surface Nets on fixed chunk sizes.
@@ -160,9 +160,9 @@ pub fn select_vertex_materials_from_positions_arrays(
 			}
 			let mut best_m: usize = chosen_mat as usize;
 			let mut best_c: u32 = counts[best_m];
-			for m in 0..256usize {
-				if counts[m] > best_c {
-					best_c = counts[m];
+			for (m, &c) in counts.iter().enumerate() {
+				if c > best_c {
+					best_c = c;
 					best_m = m;
 				}
 			}

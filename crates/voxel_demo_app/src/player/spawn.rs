@@ -5,8 +5,8 @@ use leafwing_abilities::prelude::*;
 use leafwing_input_manager::prelude::*;
 
 use crate::player::abilities::PlayerAbility;
-use crate::player::actions::{PlayerAction, default_input_map};
-use crate::player::components::{Player, PlayerDimensions, PunchCooldown};
+use crate::player::actions::{default_input_map, PlayerAction};
+use crate::player::components::{Player, PlayerConfig, PlayerDimensions, PunchCooldown};
 use crate::player::orientation::visor::attach_player_visor;
 
 pub fn setup_player(
@@ -60,6 +60,7 @@ pub fn setup_player(
 		},
 		PunchCooldown::default(),
 		PlayerDimensions { height, radius },
+		PlayerConfig::default(),
 	));
 
 	// Visor child to indicate player forward orientation

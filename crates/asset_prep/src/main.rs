@@ -33,10 +33,11 @@ fn collect_one_per_subdir(root: &Path) -> Result<Vec<PathBuf>> {
 				let sub = sub?;
 				let p = sub.path();
 				if let Some(name) = p.file_name().and_then(|s| s.to_str())
-					&& is_albedo(name) {
-						chosen = Some(p.clone());
-						break;
-					}
+					&& is_albedo(name)
+				{
+					chosen = Some(p.clone());
+					break;
+				}
 			}
 			if let Some(p) = chosen {
 				picks.push(p);

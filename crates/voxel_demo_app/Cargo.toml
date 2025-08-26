@@ -12,6 +12,9 @@ crate-type = ["staticlib", "rlib"]
 # Or for debug builds: RUSTFLAGS="--cfg feature=\"diagnostics_ui\"" cargo run
 diagnostics_ui = ["dep:iyes_perf_ui"]
 
+# Debugging helpers for in-world gizmos
+debug_gizmos = []
+
 # Default features
 default = []
 

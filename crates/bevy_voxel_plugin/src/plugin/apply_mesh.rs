@@ -1,12 +1,10 @@
 use avian3d::prelude::{Collider, RigidBody};
 use bevy::prelude::*;
 use bevy::render::mesh::Mesh;
-use bevy::render::mesh::MeshAabb;
 use std::time::Instant;
 use tracing::{info_span, trace};
 
 use crate::voxel_plugin::meshing::bevy_mesh::buffer_to_meshes_per_material;
-use crate::voxel_plugin::meshing::surface_nets::remesh_chunk_dispatch;
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
 use ilattice::prelude::IVec3 as ILVec3;
@@ -65,7 +63,6 @@ pub(crate) fn apply_remeshes(
 		}
 		let mesh = meshes_vec.into_iter().next().unwrap();
 		trace!("compute_aabb_begin");
-		let aabb = mesh.compute_aabb();
 		// info!(target: "vox", "apply_mesh: mesh bounds {:?} for entity {:?}", aabb, ev.entity);
 		let mesh_handle = meshes.add(mesh);
 		let mesh_id = mesh_handle.id();
@@ -107,6 +104,7 @@ pub(crate) fn apply_remeshes(
 
 /// Perform a synchronous remesh for all chunks and apply meshes + colliders.
 /// This is intended to run once at Startup after seeding so colliders exist before gameplay.
+#[allow(dead_code)]
 pub(crate) fn initial_sync_remesh_and_apply(
 	desc: Res<super::VoxelVolumeDesc>,
 	render_mat: Option<Res<super::VoxelRenderMaterial>>,

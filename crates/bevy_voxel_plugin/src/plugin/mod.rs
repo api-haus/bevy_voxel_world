@@ -18,9 +18,9 @@ use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use rendering_materials::TriplanarExtension;
 pub(crate) use rendering_materials::{
-	VoxelRenderMaterial,
+	VoxelRenderMaterial, // Temporarily disabled for iOS debugging
 	init_texture_loading,
-	init_voxel_material_when_ready, // Temporarily disabled for iOS debugging
+	init_voxel_material_when_ready,
 };
 pub(crate) use scheduler::{
 	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,

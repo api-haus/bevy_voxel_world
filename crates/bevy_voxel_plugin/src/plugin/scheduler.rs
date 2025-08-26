@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, info_span, trace};
+use tracing::{debug, info_span, trace};
 
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions_arrays;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;

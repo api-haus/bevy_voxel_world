@@ -68,7 +68,7 @@ tasks:
     desc: Run voxel demo app (no diagnostics)
     dir: /Volumes/Archive2TB/_dev/bevister
     cmds:
-      - cargo run -p voxel_demo_app
+      - cargo run -p voxel_demo_app --features debug_gizmos
 
   run:diag:
     desc: Run voxel demo app with diagnostics UI enabled

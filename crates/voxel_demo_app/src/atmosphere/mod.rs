@@ -3,6 +3,7 @@ use bevy::pbr::light_consts::lux;
 use bevy::pbr::{AmbientLight, CascadeShadowConfigBuilder, DirectionalLight};
 use bevy::prelude::*;
 
+#[allow(dead_code)]
 pub struct AtmospherePlugin;
 
 impl Plugin for AtmospherePlugin {
@@ -12,6 +13,7 @@ impl Plugin for AtmospherePlugin {
 }
 
 /// Sets up atmospheric scattering and skybox for realistic sky rendering
+#[allow(dead_code)]
 pub fn setup_atmosphere(mut commands: Commands, mut ambient: ResMut<AmbientLight>) {
 	// Tune global ambient so shadowed areas aren't pitch black
 	ambient.color = Color::srgb(0.75, 0.82, 0.95);

@@ -1,0 +1,188 @@
+use avian3d::prelude as avian;
+use bevy::prelude::*;
+use leafwing_input_manager::prelude::*;
+use tracing::debug;
+
+use crate::player::actions::PlayerAction;
+use crate::player::components::{ClimbConfig, Player, PlayerConfig, PlayerDimensions};
+use crate::player::states::{PlayerMoveState, PlayerState};
+
+#[derive(Component, Default, Clone, Copy)]
+#[cfg_attr(not(feature = "debug_gizmos"), allow(dead_code))]
+pub struct ClimbContact {
+	pub point: Vec3,
+	pub normal: Vec3,
+}
+
+pub fn detect_climbable(
+	mut commands: Commands,
+	q_player: Query<
+		(
+			Entity,
+			&GlobalTransform,
+			&Player,
+			&PlayerConfig,
+			&PlayerDimensions,
+		),
+		With<Player>,
+	>,
+	mut spatial_query: avian::SpatialQuery,
+	config: Res<ClimbConfig>,
+	mut _gizmos: Gizmos,
+) {
+	let Ok((ent, xf, player, pconf, dims)) = q_player.single() else {
+		debug!("climb: no valid player");
+		return;
+	};
+	let origin = xf.translation();
+	let mut move_dir = player.facing.normalize_or_zero();
+	if move_dir == Vec3::ZERO {
+		move_dir = Vec3::Z;
+	}
+	let chest = origin + Vec3::Y * 0.8;
+	let samples = [chest];
+	let max_dist = config.detect_distance;
+
+	spatial_query.update_pipeline();
+
+	let mut contact: Option<ClimbContact> = None;
+	let mut best: Option<(Vec3, f32)> = None;
+	for s in samples.into_iter() {
+		let origin = s + move_dir * (dims.radius + 0.05);
+		if let Some(hit) = spatial_query.cast_ray(
+			origin,
+			Dir3::new_unchecked(move_dir),
+			max_dist,
+			true,
+			&avian::SpatialQueryFilter::default(),
+		) {
+			let hit_dist = hit.distance.min(max_dist);
+			let n = hit.normal.normalize_or_zero();
+			let surface_slope_from_horizontal = (n.dot(Vec3::Y).abs()).clamp(0.0, 1.0).acos();
+			let is_steeper_than_walkable = surface_slope_from_horizontal > pconf.walk_max_slope_rad;
+			let facing_dot = n.dot(move_dir);
+			let min_self_distance = 0.1;
+			if is_steeper_than_walkable
+				&& facing_dot < -0.2
+				&& hit_dist > min_self_distance
+				&& best.map(|(_, d)| hit_dist < d).unwrap_or(true)
+			{
+				best = Some((n, hit_dist));
+			}
+			debug!(
+				hit_distance = hit_dist,
+				facing_dot,
+				slope = surface_slope_from_horizontal,
+				is_steeper_than_walkable,
+				"climb: ray hit"
+			);
+			#[cfg(feature = "debug_gizmos")]
+			{
+				let start = origin;
+				let end = start + move_dir * hit_dist;
+				let col = if is_steeper_than_walkable && facing_dot < -0.2 {
+					Color::srgb(0.2, 1.0, 0.2)
+				} else {
+					Color::srgb(0.8, 0.2, 0.2)
+				};
+				_gizmos.sphere(s, 0.06, Color::srgb(0.9, 0.9, 0.9));
+				_gizmos.sphere(start, 0.05, Color::srgb(0.6, 0.6, 0.6));
+				_gizmos.arrow(start, end, col);
+				_gizmos.arrow(end, end + n * 0.4, Color::srgb(0.9, 0.9, 0.2));
+			}
+		}
+	}
+	if let Some((n, d)) = best {
+		if d <= config.engage_distance {
+			contact = Some(ClimbContact {
+				point: chest + move_dir * d,
+				normal: n,
+			});
+			debug!(distance = d, normal = ?n, "climb: contact within engage distance");
+		} else {
+			commands.entity(ent).remove::<ClimbContact>();
+			debug!(
+				distance = d,
+				"climb: contact too far; removing ClimbContact"
+			);
+		}
+	}
+	if let Some(c) = contact {
+		commands.entity(ent).insert(c);
+		#[cfg(feature = "debug_gizmos")]
+		{
+			_gizmos.sphere(c.point, 0.1, Color::srgb(1.0, 0.2, 0.2));
+			_gizmos.arrow(
+				c.point,
+				c.point + c.normal * 0.5,
+				Color::srgb(0.9, 0.9, 0.2),
+			);
+			let right = Vec3::Y.cross(c.normal).normalize_or_zero();
+			_gizmos.arrow(
+				c.point,
+				c.point + right * 0.5,
+				Color::srgb(0.95, 0.35, 0.35),
+			);
+		}
+	} else {
+		commands.entity(ent).remove::<ClimbContact>();
+		debug!("climb: no valid contact; removing ClimbContact");
+	}
+}
+
+pub struct Climb;
+
+impl PlayerState for Climb {
+	const VARIANT: PlayerMoveState = PlayerMoveState::Climb;
+}
+
+impl Climb {
+	pub fn on_enter() {}
+	pub fn on_exit() {}
+
+	#[allow(clippy::type_complexity)]
+	pub fn on_update(
+		mut q: Query<
+			(
+				&mut avian3d::prelude::LinearVelocity,
+				&GlobalTransform,
+				&ActionState<PlayerAction>,
+				Option<&ClimbContact>,
+			),
+			With<crate::player::components::Player>,
+		>,
+		cfg: Res<crate::player::components::ClimbConfig>,
+	) {
+		let Ok((mut lv, xf, actions, contact)) = q.single_mut() else {
+			return;
+		};
+		let normal = contact.map(|c| c.normal).unwrap_or(Vec3::Z);
+		let right = Vec3::Y.cross(normal).normalize_or_zero();
+		let x = (actions.pressed(&PlayerAction::MoveRight) as i32
+			- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
+		let y = (actions.pressed(&PlayerAction::MoveForward) as i32
+			- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
+		let lateral = right * x * cfg.lateral_speed;
+		let vertical_speed = if y >= 0.0 {
+			cfg.up_speed
+		} else {
+			cfg.down_speed
+		};
+		let vertical = Vec3::Y * y.abs() * vertical_speed;
+		let stick = -normal * cfg.stick_inward_speed;
+		let desired = lateral + vertical + stick;
+		lv.0 = desired;
+		debug!(
+				x,
+				y,
+				right = ?right,
+				normal = ?normal,
+				lateral = ?lateral,
+				vertical = ?vertical,
+				stick = ?stick,
+				desired = ?desired,
+				pos = ?xf.translation(),
+				"climb: control vectors"
+		);
+	}
+}

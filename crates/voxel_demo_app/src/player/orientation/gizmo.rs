@@ -1,13 +1,16 @@
+#[cfg(feature = "debug_gizmos")]
 use bevy::prelude::*;
 
+#[cfg(feature = "debug_gizmos")]
 use crate::player::components::Player;
 
 /// Visualize the player's forward orientation (chest-height) using a gizmo arrow.
+#[cfg(feature = "debug_gizmos")]
 pub fn visualize_player_orientation(
 	mut gizmos: Gizmos,
 	q_player: Query<(&GlobalTransform, &Player), With<Player>>,
 ) {
-	let Ok((player_xf, player)) = q_player.get_single() else {
+	let Ok((player_xf, player)) = q_player.single() else {
 		return;
 	};
 	let p = player_xf.translation();

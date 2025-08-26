@@ -40,6 +40,7 @@ fn material_from_noise(pos: ILVec3) -> u8 {
 }
 
 /// Random sphere field seeding used in the demo. Behavior identical to the previous inline version.
+#[allow(dead_code)]
 pub(crate) fn seed_random_spheres_sdf(
 	desc: Res<crate::plugin::VoxelVolumeDesc>,
 	mut queue: ResMut<crate::plugin::RemeshQueue>,
@@ -365,7 +366,6 @@ pub(crate) fn seed_terrain_noise_sdf(
 				.copied()
 				.collect();
 
-			let any_solid = false;
 			for z in 0..sz {
 				for y in 0..sy {
 					for x in 0..sx {

@@ -106,7 +106,7 @@ pub fn follow_player(
 	mut q_cam: Query<(&mut Transform, &mut OrbitCam)>,
 	q_player: Query<&GlobalTransform, With<Player>>,
 ) {
-	let Ok(player_xf) = q_player.get_single() else {
+	let Ok(player_xf) = q_player.single() else {
 		return;
 	};
 	let p = player_xf.translation();
@@ -123,7 +123,7 @@ pub fn apply_to_camera(
 	q_orbit: Query<&Transform, With<OrbitCam>>,
 	mut q_real: Query<&mut Transform, (With<Camera3d>, Without<OrbitCam>)>,
 ) {
-	let Ok(orbit_tf) = q_orbit.get_single() else {
+	let Ok(orbit_tf) = q_orbit.single() else {
 		return;
 	};
 	for mut cam_tf in q_real.iter_mut() {
