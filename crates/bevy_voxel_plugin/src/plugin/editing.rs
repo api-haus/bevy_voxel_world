@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use ilattice::prelude::IVec3 as ILVec3;
 
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
+use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
 
 #[derive(Clone, Copy, Debug)]
 pub enum EditOp {

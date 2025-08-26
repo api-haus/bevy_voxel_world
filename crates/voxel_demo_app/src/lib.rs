@@ -4,19 +4,19 @@ use bevy::log::{Level, LogPlugin};
 use bevy::pbr::{ExtendedMaterial, MaterialPlugin, StandardMaterial};
 use bevy::prelude::*;
 use bevy::window::WindowMode;
-use bevy_enhanced_input::prelude;
-use bevy_enhanced_input::prelude::InputContextAppExt;
 use bevy_prng::WyRand;
 use bevy_rand::plugin::EntropyPlugin;
-use prelude::EnhancedInputPlugin;
+use bevy_tnua::prelude::*;
+use bevy_tnua_avian3d::TnuaAvian3dPlugin;
 use std::path::{Path, PathBuf};
 
-use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin, VoxelVolume};
+use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin};
 mod atmosphere;
 mod camera;
 #[cfg(feature = "diagnostics_ui")]
 mod diag;
-mod fly_cam;
+pub mod orbit_cam;
+mod player;
 #[cfg(target_os = "ios")]
 use bevy_ios_iap::IosIapPlugin;
 #[cfg(target_os = "ios")]
@@ -30,12 +30,6 @@ pub unsafe extern "C" fn rust_main() {
 
 /// Shared runner used by both desktop (bin main) and iOS launcher (rust_main)
 pub fn run() {
-	// Resolve assets root robustly
-	#[cfg(target_os = "ios")]
-	{
-		// Canary log to verify iOS stdio→NSLog bridge
-		eprintln!("[vox] voxel_demo_app starting (iOS)");
-	}
 	let assets_root: PathBuf = {
 		let mut candidates: Vec<PathBuf> = Vec::new();
 		if let Ok(env_override) = std::env::var("BEVISTER_ASSETS") {
@@ -54,33 +48,44 @@ pub fn run() {
 			.unwrap_or_else(|| PathBuf::from("assets"))
 	};
 
-	App::new()
-		.add_plugins((
-			DefaultPlugins
-				.set(LogPlugin {
-					level: Level::DEBUG,
-					filter: "wgpu=error,bevy_render=info,bevy_ecs=trace,vox=trace".to_string(),
-					..Default::default()
-				})
-				.set(WindowPlugin {
-					primary_window: Some(Window {
-						resizable: false,
-						mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
-						recognize_rotation_gesture: true,
-						prefers_home_indicator_hidden: true,
-						prefers_status_bar_hidden: true,
-						..default()
-					}),
+	let log_filter = "wgpu=error,bevy_render=info,bevy_ecs=trace,vox=trace".to_string();
+
+	let mut app = App::new();
+	app.add_plugins({
+		let mut p = DefaultPlugins
+			.set(LogPlugin {
+				level: Level::DEBUG,
+				filter: log_filter,
+				..Default::default()
+			})
+			.set(AssetPlugin {
+				file_path: assets_root.display().to_string(),
+				..Default::default()
+			});
+		#[cfg(not(target_os = "ios"))]
+		{
+			p = p.set(WindowPlugin {
+				primary_window: Some(Window {
+					resizable: false,
+					mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+					recognize_rotation_gesture: true,
+					prefers_home_indicator_hidden: true,
+					prefers_status_bar_hidden: true,
 					..default()
-				})
-				.set(AssetPlugin {
-					file_path: assets_root.display().to_string(),
-					..Default::default()
 				}),
+				..default()
+			});
+		}
+		p
+	});
+
+	app
+		.add_plugins((
 			PhysicsPlugins::default(),
-			EnhancedInputPlugin,
 			VoxelPlugin,
 			EntropyPlugin::<WyRand>::default(),
+			TnuaControllerPlugin::new(FixedUpdate),
+			TnuaAvian3dPlugin::new(FixedUpdate),
 			#[cfg(feature = "diagnostics_ui")]
 			diag::DiagPlugin,
 			#[cfg(target_os = "ios")]
@@ -90,33 +95,11 @@ pub fn run() {
 			#[cfg(feature = "diagnostics_ui")]
 			diag::onscreen::OnScreenDiagPlugin,
 			MaterialPlugin::<ExtendedMaterial<StandardMaterial, TriplanarExtension>>::default(),
+			// Feature plugins
+			player::PlayerPlugin,
+			camera::CameraPlugin,
+			atmosphere::AtmospherePlugin,
+			orbit_cam::OrbitCamPlugin,
 		))
-		.add_input_context::<fly_cam::FlyCamCtx>()
-		.add_systems(
-			Startup,
-			(
-				fly_cam::setup,
-				camera::setup_camera_rendering,
-				atmosphere::setup_atmosphere,
-			)
-				.chain(),
-		)
-		.add_systems(
-			Update,
-			(
-				fly_cam::mouse_look,
-				fly_cam::movement,
-				fly_cam::interact,
-				spin_volume,
-			),
-		)
 		.run();
-}
-
-fn spin_volume(time: Res<Time>, mut q: Query<&mut Transform, With<VoxelVolume>>) {
-	let dt = time.delta_secs();
-	for mut t in q.iter_mut() {
-		let rot = Quat::from_rotation_y(0.2 * dt);
-		t.rotate(rot);
-	}
 }

@@ -6,6 +6,7 @@ use std::time::Instant;
 use tracing::{info_span, trace};
 
 use crate::voxel_plugin::meshing::bevy_mesh::buffer_to_meshes_per_material;
+use crate::voxel_plugin::meshing::surface_nets::remesh_chunk_dispatch;
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
 use ilattice::prelude::IVec3 as ILVec3;
@@ -20,10 +21,8 @@ pub(crate) fn apply_remeshes(
 	mut q_chunk_tf: Query<(&super::VoxelChunk, &VoxelStorage, &mut Transform)>,
 ) {
 	let Some(render_mat) = render_mat else {
-		info!(target: "vox", "apply_remeshes: skipping - render material not ready");
 		return;
 	};
-	info!(target: "vox", "apply_remeshes: render material available");
 	for ev in evr.read() {
 		let span = info_span!(
 				"apply_mesh",
@@ -89,4 +88,60 @@ pub(crate) fn apply_remeshes(
 			telemetry.apply_time_ms_frame += t0.elapsed().as_secs_f32() * 1000.0;
 		}
 	}
+}
+
+/// Perform a synchronous remesh for all chunks and apply meshes + colliders.
+/// This is intended to run once at Startup after seeding so colliders exist before gameplay.
+pub(crate) fn initial_sync_remesh_and_apply(
+	desc: Res<super::VoxelVolumeDesc>,
+	render_mat: Option<Res<super::VoxelRenderMaterial>>,
+	mut telemetry: ResMut<super::VoxelTelemetry>,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut commands: Commands,
+	mut q_chunk: Query<(Entity, &super::VoxelChunk, &VoxelStorage, &mut Transform)>,
+) {
+	let Some(render_mat) = render_mat else {
+		info!(target: "vox", "initial_sync_remesh_and_apply: skipping - render material not ready");
+		return;
+	};
+	let mut applied_count = 0usize;
+	for (entity, chunk, storage, mut transform) in q_chunk.iter_mut() {
+		if let Some(buffer) = remesh_chunk_dispatch(storage) {
+			let vmat = select_vertex_materials_from_positions(storage, &buffer.positions);
+			let vertex_colors: Vec<[f32; 4]> = vmat
+				.iter()
+				.map(|&m| [(m as f32) / 255.0, 0.0, 0.0, 1.0])
+				.collect();
+			let meshes_vec = buffer_to_meshes_per_material(&buffer, Some(&vertex_colors));
+			if let Some(mesh) = meshes_vec.into_iter().next() {
+				let mesh_handle = meshes.add(mesh);
+				let core = desc.chunk_core_dims;
+				let offset = ILVec3::new(
+					(core.x as i32) * chunk.chunk_coords.x,
+					(core.y as i32) * chunk.chunk_coords.y,
+					(core.z as i32) * chunk.chunk_coords.z,
+				);
+				let min = desc.origin_cell + offset - ILVec3::ONE;
+				transform.translation = Vec3::new(min.x as f32, min.y as f32, min.z as f32);
+
+				// Insert mesh + material
+				commands.entity(entity).insert((
+					Mesh3d(mesh_handle.clone()),
+					MeshMaterial3d(render_mat.handle.clone()),
+				));
+
+				// Build collider from mesh
+				if let Some(mesh_ref) = meshes.get(mesh_handle.id()) {
+					if let Some(collider) = Collider::trimesh_from_mesh(mesh_ref) {
+						commands
+							.entity(entity)
+							.insert((RigidBody::Static, collider));
+					}
+				}
+				applied_count += 1;
+			}
+		}
+	}
+	telemetry.total_meshed += applied_count as u64;
+	telemetry.meshed_this_frame += applied_count as u32;
 }

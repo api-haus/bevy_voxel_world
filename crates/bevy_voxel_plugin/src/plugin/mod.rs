@@ -11,18 +11,18 @@ mod volume_spawn;
 
 mod authoring {
 	pub(crate) use crate::authoring::components::{CsgOp, SdfBox, SdfSphere};
-	pub(crate) use crate::authoring::seed::seed_random_spheres_sdf;
+	pub(crate) use crate::authoring::seed::seed_terrain_noise_sdf;
 }
 use apply_mesh::apply_remeshes;
 pub use editing::{EditOp, VoxelEditEvent};
 pub use rendering_materials::TriplanarExtension;
 pub(crate) use rendering_materials::{
-	VoxelRenderMaterial,
 	// init_texture_loading, init_voxel_material_when_ready, // Temporarily disabled for iOS debugging
 	init_simple_material,
+	VoxelRenderMaterial,
 };
 pub(crate) use scheduler::{
-	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
+	drain_queue_and_spawn_jobs, pump_remesh_results, RemeshBudget, RemeshQueue,
 };
 pub(crate) use tracing::telemetry::VoxelTelemetry;
 use tracing::telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
@@ -123,7 +123,8 @@ impl Plugin for VoxelPlugin {
 					// init_texture_loading,
 					init_simple_material,
 					volume_spawn::spawn_volume_chunks,
-					authoring::seed_random_spheres_sdf,
+					authoring::seed_terrain_noise_sdf,
+					apply_mesh::initial_sync_remesh_and_apply,
 				)
 					.chain(),
 			)
