@@ -1,12 +1,19 @@
 use bevy::prelude::*;
+
 use bevy_prng::*;
+
 use bevy_rand::global::GlobalEntropy;
+
 use ilattice::prelude::{IVec3 as ILVec3, UVec3};
+
 use rand::Rng;
+
 use rayon::prelude::*;
+
 use tracing::{debug, info, info_span, trace};
 
 use crate::core::index::linear_index;
+
 use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
 
 /// Simple integer hash mix (wyhash-inspired) for generating deterministic noise
@@ -36,6 +43,7 @@ fn material_from_noise(pos: ILVec3) -> u8 {
 	let gz = pos.z.div_euclid(REGION) as u32;
 	let h = hash3(gx, gy, gz, SEED);
 	let id = (h % 255u32) as u8;
+
 	if id == 0 { 1 } else { id }
 }
 
@@ -69,6 +77,7 @@ pub(crate) fn seed_random_spheres_sdf(
 		aabb_min: ILVec3,
 		aabb_max: ILVec3,
 	}
+
 	let spheres: Vec<Sphere> = (0..sphere_count)
 		.map(|_| {
 			let cx = rng.random_range(0..vol_shape.x);
@@ -94,6 +103,7 @@ pub(crate) fn seed_random_spheres_sdf(
 		sample_min: ILVec3,
 		sample_dims: UVec3,
 	}
+
 	let tasks: Vec<ChunkTask> = q_chunks
 		.iter_mut()
 		.map(|(e, storage, chunk)| {
@@ -144,17 +154,24 @@ pub(crate) fn seed_random_spheres_sdf(
 
 			if intersecting.is_empty() {
 				trace!(target: "vox", "seed_chunk_empty entity={:?} sample_min={:?} dims={:?}", task.entity, task.sample_min, task.sample_dims);
+
 				return (task.entity, sdf, mat);
 			}
 
+
 			let mut _any_solid = false;
+
 			for z in 0..sz {
+
 				for y in 0..sy {
+
 					for x in 0..sx {
 						let p = ILVec3::new(x as i32, y as i32, z as i32) + chunk_min;
 						let idx = linear_index(x, y, z, task.sample_dims);
 						let mut dmin = sdf[idx];
+
 						for s in &intersecting {
+
 							if p.x < s.aabb_min.x
 								|| p.x > s.aabb_max.x
 								|| p.y < s.aabb_min.y
@@ -164,12 +181,14 @@ pub(crate) fn seed_random_spheres_sdf(
 							{
 								continue;
 							}
+
 							let dx = (p.x - s.center.x) as f32;
 							let dy = (p.y - s.center.y) as f32;
 							let dz = (p.z - s.center.z) as f32;
 							let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 							dmin = dmin.min(dist - s.radius);
 						}
+
 						sdf[idx] = dmin;
 						mat[idx] = if dmin <= 0.0 {
 							_any_solid = true;
@@ -181,11 +200,13 @@ pub(crate) fn seed_random_spheres_sdf(
 				}
 			}
 
+
 			(task.entity, sdf, mat)
 		})
 		.collect();
 
 	let mut enq = 0usize;
+
 	for (entity, sdf, mat) in results.into_iter() {
 		if let Ok((e, mut storage, _chunk)) = q_chunks.get_mut(entity) {
 			storage.sdf.copy_from_slice(&sdf);
@@ -317,6 +338,7 @@ pub(crate) fn seed_terrain_noise_sdf(
 		sample_min: ILVec3,
 		sample_dims: UVec3,
 	}
+
 	let tasks: Vec<ChunkTask> = q_chunks
 		.iter_mut()
 		.map(|(e, storage, chunk)| {
@@ -378,8 +400,10 @@ pub(crate) fn seed_terrain_noise_sdf(
 
 						// Rotated cubes SDF union
 						let mut d = d_terrain;
+
 						if !intersecting.is_empty() {
 							let pf = Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+
 							for c in &intersecting {
 								let local = c.rot.inverse() * (pf - c.center);
 								let q = local.abs() - c.half_extents;
@@ -392,6 +416,7 @@ pub(crate) fn seed_terrain_noise_sdf(
 						}
 
 						sdf[idx] = d;
+
 						if d <= 0.0 {
 							// mark that this chunk has some solids; currently unused but kept for debugging potential
 							mat[idx] = material_from_noise(p);
@@ -407,6 +432,7 @@ pub(crate) fn seed_terrain_noise_sdf(
 		.collect();
 
 	let mut enq = 0usize;
+
 	for (entity, sdf, mat) in results.into_iter() {
 		if let Ok((e, mut storage, _chunk)) = q_chunks.get_mut(entity) {
 			storage.sdf.copy_from_slice(&sdf);

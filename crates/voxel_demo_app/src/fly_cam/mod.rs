@@ -1,10 +1,15 @@
 use crate::player::state::PlayerMoveState;
+
 use avian3d::prelude as avian;
+
 use bevy::prelude::*;
+
 use bevy_enhanced_input::prelude::*;
 
 use bevy_voxel_plugin::plugin::EditOp;
+
 use bevy_voxel_plugin::plugin::VoxelEditEvent;
+
 use bevy_voxel_plugin::plugin::VoxelVolumeDesc;
 
 #[derive(Component)]
@@ -17,6 +22,7 @@ pub struct FlyCamTuning {
 	pub boost_multiplier: f32,
 }
 
+
 impl Default for FlyCamTuning {
 	fn default() -> Self {
 		Self {
@@ -27,11 +33,13 @@ impl Default for FlyCamTuning {
 	}
 }
 
+
 #[derive(Component, Default)]
 pub struct FlyCam {
 	pub yaw: f32,
 	pub pitch: f32,
 }
+
 
 #[derive(InputAction)]
 #[action_output(Vec3)]
@@ -74,6 +82,7 @@ pub enum FlyCamSet {
 	Interact,
 }
 
+
 impl Plugin for FlyCamPlugin {
 	fn build(&self, app: &mut App) {
 		app
@@ -98,6 +107,7 @@ impl Plugin for FlyCamPlugin {
 			);
 	}
 }
+
 
 pub fn setup(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
 	commands.insert_resource(FlyCamTuning::default());
@@ -154,6 +164,7 @@ pub fn setup(mut commands: Commands, desc: Res<VoxelVolumeDesc>) {
 	));
 }
 
+
 pub fn interact(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
@@ -170,13 +181,16 @@ pub fn interact(
 		let forward = -xf.compute_transform().forward();
 
 		for ent in actions.iter() {
+
 			if let Ok(d) = q_dig.get(ent) {
+
 				if **d {
 					let dir_vec = -forward.normalize_or_zero();
 					let max_t = 100.0;
 					let mut hit_point = cam_pos + dir_vec * max_t;
 					// Update and cast ray via Avian3D SpatialQuery; fall back to max distance if nothing hit
 					spatial_query.update_pipeline();
+
 					if let Some(hit) = spatial_query.cast_ray(
 						cam_pos,
 						Dir3::new_unchecked(dir_vec),
@@ -186,6 +200,7 @@ pub fn interact(
 					) {
 						hit_point = cam_pos + dir_vec * hit.distance;
 					}
+
 					evw_dig.write(VoxelEditEvent {
 						center_world: hit_point,
 						radius: 1.0,
@@ -193,12 +208,15 @@ pub fn interact(
 					});
 				}
 			}
+
 			if let Ok(p) = q_place.get(ent) {
+
 				if **p {
 					let dir_vec = -forward.normalize_or_zero();
 					let max_t = 100.0;
 					let mut hit_point = cam_pos + dir_vec * max_t;
 					spatial_query.update_pipeline();
+
 					if let Some(hit) = spatial_query.cast_ray(
 						cam_pos,
 						Dir3::new_unchecked(dir_vec),
@@ -208,6 +226,7 @@ pub fn interact(
 					) {
 						hit_point = cam_pos + dir_vec * hit.distance;
 					}
+
 					evw_dig.write(VoxelEditEvent {
 						center_world: hit_point,
 						radius: 2.0,
@@ -215,7 +234,9 @@ pub fn interact(
 					});
 				}
 			}
+
 			if let Ok(s) = q_shoot.get(ent) {
+
 				if **s {
 					let radius = 0.5;
 					let start = cam_pos - forward * 2.0;
@@ -242,6 +263,7 @@ pub fn interact(
 	}
 }
 
+
 pub fn mouse_look(
 	mut q_cam: Query<(&mut Transform, &mut FlyCam, &Actions<FlyCamCtx>)>,
 	q_look: Query<&Action<Look2D>>,
@@ -251,17 +273,22 @@ pub fn mouse_look(
 	for (mut transform, mut fly, actions) in q_cam.iter_mut() {
 		let mut look = Vec2::ZERO;
 		let mut aiming = false;
+
 		for ent in actions.iter() {
+
 			if let Ok(v) = q_look.get(ent) {
 				look = **v;
 			}
+
 			if let Ok(a) = q_aim.get(ent) {
 				aiming = **a;
 			}
 		}
+
 		if !aiming || look == Vec2::ZERO {
 			continue;
 		}
+
 
 		fly.yaw -= look.x * cfg.look_sensitivity * 0.01;
 		fly.pitch -= look.y * cfg.look_sensitivity * 0.01;
@@ -273,6 +300,7 @@ pub fn mouse_look(
 	}
 }
 
+
 pub fn movement(
 	time: Res<Time>,
 	mut q_cam: Query<(&mut Transform, &Actions<FlyCamCtx>)>,
@@ -283,17 +311,22 @@ pub fn movement(
 	for (mut t, actions) in q_cam.iter_mut() {
 		let mut move_vec = Vec3::ZERO;
 		let mut boosting = false;
+
 		for ent in actions.iter() {
+
 			if let Ok(v) = q_move.get(ent) {
 				move_vec = **v;
 			}
+
 			if let Ok(b) = q_boost.get(ent) {
 				boosting = **b;
 			}
 		}
+
 		if move_vec == Vec3::ZERO {
 			continue;
 		}
+
 		let speed = cfg.move_speed * if boosting { cfg.boost_multiplier } else { 1.0 };
 		let forward = t.forward();
 		let right = t.right();

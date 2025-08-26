@@ -1,7 +1,9 @@
 use bevy::prelude::*;
+
 use ilattice::prelude::IVec3 as ILVec3;
 
 use crate::core::index::linear_index;
+
 use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
 
 #[derive(Clone, Copy, Debug)]
@@ -32,6 +34,7 @@ pub(crate) fn apply_edit_events(
 			ev.center_world
 		};
 		let radius = ev.radius;
+
 		for (entity, mut storage, chunk) in q_chunks.iter_mut() {
 			let s = storage.dims.sample;
 			let core = desc.chunk_core_dims;
@@ -46,10 +49,13 @@ pub(crate) fn apply_edit_events(
 				min.y + (s.y as i32 - 1),
 				min.z + (s.z as i32 - 1),
 			);
+
 			if !sphere_aabb_intersects(center, radius, min, max) {
 				continue;
 			}
+
 			let mut changed = false;
+
 			for z in 0..s.z {
 				for y in 0..s.y {
 					for x in 0..s.x {
@@ -65,6 +71,7 @@ pub(crate) fn apply_edit_events(
 							EditOp::Destroy => s_old.max(-b),
 							EditOp::Place => s_old.min(b),
 						};
+
 						if s_new != s_old {
 							match ev.op {
 								EditOp::Destroy => {
@@ -72,6 +79,7 @@ pub(crate) fn apply_edit_events(
 										storage.mat[idx] = AIR_ID;
 									}
 								}
+
 								EditOp::Place => {
 									if s_old >= 0.0 && s_new < 0.0 {
 										// TODO: select material; default 1 for now
@@ -79,12 +87,14 @@ pub(crate) fn apply_edit_events(
 									}
 								}
 							}
+
 							storage.sdf[idx] = s_new;
 							changed = true;
 						}
 					}
 				}
 			}
+
 			if changed {
 				queue.inner.push_back(entity);
 			}

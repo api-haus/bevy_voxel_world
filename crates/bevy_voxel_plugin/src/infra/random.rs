@@ -1,6 +1,7 @@
 //! Random number generator adapter
 
 use crate::voxel::ports::RandomGenerator;
+
 use rand::Rng;
 
 /// WyRand-based random generator adapter

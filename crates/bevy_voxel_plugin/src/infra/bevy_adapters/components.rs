@@ -1,6 +1,7 @@
 //! Bevy component adapters
 
 use crate::voxel::{ChunkCoords, VoxelChunk as DomainChunk};
+
 use bevy::prelude::*;
 
 /// Bevy component marking a voxel volume entity

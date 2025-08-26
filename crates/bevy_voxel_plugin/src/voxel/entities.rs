@@ -1,6 +1,7 @@
 //! Voxel entities
 
 use crate::voxel::types::*;
+
 use ilattice::prelude::IVec3;
 
 /// A voxel chunk containing SDF and material data
@@ -82,10 +83,12 @@ impl VoxelChunk {
 			} else if sdf <= 0.0 {
 				has_negative = true;
 			}
+
 			if has_positive && has_negative {
 				return true;
 			}
 		}
+
 		false
 	}
 }
@@ -132,6 +135,7 @@ impl VoxelVolume {
 	/// Calculate linear index for chunk coordinates
 	fn chunk_index(&self, coords: ChunkCoords) -> Option<usize> {
 		let c = coords.0;
+
 		if c.x < 0
 			|| c.y < 0
 			|| c.z < 0

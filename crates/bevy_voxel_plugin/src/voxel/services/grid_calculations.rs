@@ -1,6 +1,7 @@
 //! Grid calculation services
 
 use crate::voxel::types::*;
+
 use ilattice::prelude::{Extent, IVec3};
 
 /// Calculate world position from chunk coordinates and local position

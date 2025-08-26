@@ -49,6 +49,7 @@ fn touch_camera(
 		if touch.phase == TouchPhase::Started {
 			*last_position = None;
 		}
+
 		if let Some(last_position) = *last_position {
 			**camera_transform = Transform::from_xyz(
 				camera_transform.translation.x
@@ -59,6 +60,7 @@ fn touch_camera(
 			)
 			.looking_at(Vec3::ZERO, Vec3::Y);
 		}
+
 		*last_position = Some(touch.position);
 	}
 	// Rotation gestures only work on iOS
@@ -80,9 +82,11 @@ fn button_handler(
 			Interaction::Pressed => {
 				*color = BLUE.into();
 			}
+
 			Interaction::Hovered => {
 				*color = GRAY.into();
 			}
+
 			Interaction::None => {
 				*color = WHITE.into();
 			}
@@ -100,6 +104,7 @@ fn handle_lifetime(
 	for event in lifecycle_events.read() {
 		match event {
 			AppLifecycle::Idle | AppLifecycle::WillSuspend | AppLifecycle::WillResume => {}
+
 			AppLifecycle::Suspended => music_controller.pause(),
 			AppLifecycle::Running => music_controller.play(),
 		}

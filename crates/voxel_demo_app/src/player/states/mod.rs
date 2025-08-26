@@ -1,9 +1,13 @@
 use bevy::prelude::*;
+
 use tracing::info;
 
 pub mod climb;
+
 pub mod debugfly;
+
 pub mod locomotion;
+
 pub mod transitions;
 
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default, Reflect)]
@@ -44,9 +48,11 @@ pub fn resolve_transitions(
 	mut next: ResMut<NextState<PlayerMoveState>>,
 ) {
 	let intents: Vec<_> = ev_intents.read().cloned().collect();
+
 	if intents.is_empty() {
 		return;
 	}
+
 	if let Some(best) = intents.iter().max_by_key(|e| e.priority) {
 		info!(
 			target = ?best.to,
@@ -80,6 +86,7 @@ macro_rules! register_player_state {
 }
 
 pub struct PlayerStatesPlugin;
+
 impl Plugin for PlayerStatesPlugin {
 	fn build(&self, app: &mut App) {
 		app

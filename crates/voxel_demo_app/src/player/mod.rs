@@ -1,16 +1,25 @@
 pub mod abilities;
+
 pub mod actions;
+
 // merged: climb systems/state now live under states::climb
+
 pub mod components;
+
 pub mod orientation;
+
 pub mod punch;
+
 pub mod spawn;
+
 pub mod states;
 
 pub use components::Player;
 
 use bevy::prelude::*;
+
 use leafwing_abilities::prelude::AbilityPlugin;
+
 use leafwing_input_manager::prelude::InputManagerPlugin;
 
 pub struct PlayerPlugin;

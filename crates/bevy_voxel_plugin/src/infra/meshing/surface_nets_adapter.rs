@@ -1,7 +1,8 @@
 //! Surface nets meshing adapter
 
-use crate::voxel::{ports::Mesher, MeshData, VoxelChunk};
-use fast_surface_nets::{ndshape::ConstShape3u32, surface_nets, SurfaceNetsBuffer};
+use crate::voxel::{MeshData, VoxelChunk, ports::Mesher};
+
+use fast_surface_nets::{SurfaceNetsBuffer, ndshape::ConstShape3u32, surface_nets};
 
 /// Surface nets mesher implementation
 pub struct SurfaceNetsMesher;

@@ -46,10 +46,13 @@ pub fn draw_and_cleanup_punch_gizmos(
 ) {
 	for (ent, mut lifetime, gizmo) in q.iter_mut() {
 		gizmos.arrow(gizmo.origin, gizmo.tip, gizmo.color);
+
 		if gizmo.radius > 0.0 {
 			gizmos.sphere(gizmo.center, gizmo.radius, gizmo.color);
 		}
+
 		lifetime.0.tick(time.delta());
+
 		if lifetime.0.finished() {
 			commands.entity(ent).despawn();
 		}

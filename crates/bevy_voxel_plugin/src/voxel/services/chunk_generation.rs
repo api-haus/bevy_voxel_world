@@ -1,7 +1,9 @@
 //! Chunk generation services
 
 use crate::voxel::entities::*;
+
 use crate::voxel::ports::RandomGenerator;
+
 use crate::voxel::types::*;
 
 /// Generate random spheres in a volume

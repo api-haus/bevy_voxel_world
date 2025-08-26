@@ -23,6 +23,7 @@ pub(crate) fn spawn_volume_chunks(mut commands: Commands, desc: Res<super::Voxel
 		.id();
 
 	let grid = desc.grid_dims;
+
 	for z in 0..grid.z as i32 {
 		for y in 0..grid.y as i32 {
 			for x in 0..grid.x as i32 {

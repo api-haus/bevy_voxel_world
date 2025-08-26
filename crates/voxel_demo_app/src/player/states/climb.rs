@@ -1,10 +1,15 @@
 use avian3d::prelude as avian;
+
 use bevy::prelude::*;
+
 use leafwing_input_manager::prelude::*;
+
 use tracing::debug;
 
 use crate::player::actions::PlayerAction;
+
 use crate::player::components::{ClimbConfig, Player, PlayerConfig, PlayerDimensions};
+
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 #[derive(Component, Default, Clone, Copy)]
@@ -36,9 +41,11 @@ pub fn detect_climbable(
 	};
 	let origin = xf.translation();
 	let mut move_dir = player.facing.normalize_or_zero();
+
 	if move_dir == Vec3::ZERO {
 		move_dir = Vec3::Z;
 	}
+
 	let chest = origin + Vec3::Y * 0.8;
 	let samples = [chest];
 	let max_dist = config.detect_distance;
@@ -47,8 +54,10 @@ pub fn detect_climbable(
 
 	let mut contact: Option<ClimbContact> = None;
 	let mut best: Option<(Vec3, f32)> = None;
+
 	for s in samples.into_iter() {
 		let origin = s + move_dir * (dims.radius + 0.05);
+
 		if let Some(hit) = spatial_query.cast_ray(
 			origin,
 			Dir3::new_unchecked(move_dir),
@@ -62,6 +71,7 @@ pub fn detect_climbable(
 			let is_steeper_than_walkable = surface_slope_from_horizontal > pconf.walk_max_slope_rad;
 			let facing_dot = n.dot(move_dir);
 			let min_self_distance = 0.1;
+
 			if is_steeper_than_walkable
 				&& facing_dot < -0.2
 				&& hit_dist > min_self_distance
@@ -69,6 +79,7 @@ pub fn detect_climbable(
 			{
 				best = Some((n, hit_dist));
 			}
+
 			debug!(
 				hit_distance = hit_dist,
 				facing_dot,
@@ -92,6 +103,7 @@ pub fn detect_climbable(
 			}
 		}
 	}
+
 	if let Some((n, d)) = best {
 		if d <= config.engage_distance {
 			contact = Some(ClimbContact {
@@ -107,6 +119,7 @@ pub fn detect_climbable(
 			);
 		}
 	}
+
 	if let Some(c) = contact {
 		commands.entity(ent).insert(c);
 		#[cfg(feature = "debug_gizmos")]
@@ -138,6 +151,7 @@ impl PlayerState for Climb {
 
 impl Climb {
 	pub fn on_enter() {}
+
 	pub fn on_exit() {}
 
 	#[allow(clippy::type_complexity)]

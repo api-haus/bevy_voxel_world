@@ -1,11 +1,15 @@
 use bevy::pbr::{
 	ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
 };
+
 use bevy::prelude::*;
+
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
+
 use bevy::render::render_resource::{
 	AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
 };
+
 use tracing::{debug, info};
 
 #[derive(Resource)]
@@ -60,6 +64,7 @@ impl MaterialExtension for TriplanarExtension {
 	fn fragment_shader() -> ShaderRef {
 		ShaderRef::Path("shaders/triplanar_pbr.wgsl".into())
 	}
+
 	fn deferred_fragment_shader() -> ShaderRef {
 		ShaderRef::Path("shaders/triplanar_pbr.wgsl".into())
 	}
@@ -75,6 +80,7 @@ impl MaterialExtension for TriplanarExtension {
 		{
 			fragment.shader_defs.push("DEBUG_MAT_VIS".into());
 		}
+
 		Ok(())
 	}
 }
@@ -93,6 +99,7 @@ pub(crate) fn init_voxel_material_when_ready(
 	}
 
 	let load_state = asset_server.load_state(loading_texture.handle.id());
+
 	if loading_texture.is_loaded {
 		return;
 	}
@@ -101,6 +108,7 @@ pub(crate) fn init_voxel_material_when_ready(
 		debug!(target: "vox", "voxel_mat_waiting texture not loaded yet, state={:?}", load_state);
 		return;
 	}
+
 	loading_texture.is_loaded = true;
 
 	let image = images.get_mut(&loading_texture.handle).unwrap();

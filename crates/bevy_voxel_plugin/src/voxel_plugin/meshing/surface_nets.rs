@@ -1,7 +1,11 @@
 use crate::core::index::linear_index;
+
 use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
+
 use fast_surface_nets::ndshape::ConstShape3u32;
+
 use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+
 use ilattice::prelude::UVec3;
 
 /// A simple wrapper that runs Surface Nets on fixed chunk sizes.
@@ -17,16 +21,19 @@ pub fn remesh_chunk_fixed<const SX: u32, const SY: u32, const SZ: u32>(
 	// Early skip if all positive or all negative
 	let mut any_pos = false;
 	let mut any_neg = false;
+
 	for &s in storage.sdf.iter() {
 		if s <= 0.0 {
 			any_neg = true;
 		} else {
 			any_pos = true;
 		}
+
 		if any_pos && any_neg {
 			break;
 		}
 	}
+
 	if !(any_pos && any_neg) {
 		return None;
 	}
@@ -52,12 +59,15 @@ pub fn remesh_chunk_fixed<const SX: u32, const SY: u32, const SZ: u32>(
 /// Currently supports only 16^3 core (18^3 sample) chunks.
 pub fn remesh_chunk_dispatch(storage: &VoxelStorage) -> Option<SurfaceNetsBuffer> {
 	let s = storage.dims.sample;
+
 	if s.x == 18 && s.y == 18 && s.z == 18 {
 		return remesh_chunk_fixed::<18, 18, 18>(storage);
 	}
+
 	if s.x == 34 && s.y == 34 && s.z == 34 {
 		return remesh_chunk_fixed::<34, 34, 34>(storage);
 	}
+
 	None
 }
 
@@ -81,35 +91,46 @@ pub fn select_vertex_materials_from_positions_arrays(
 		(sample_dims.x * sample_dims.y * sample_dims.z) as usize
 	);
 	let mut out = Vec::with_capacity(positions.len());
+
 	if sample_dims.x < 2 || sample_dims.y < 2 || sample_dims.z < 2 {
 		out.resize(positions.len(), AIR_ID);
+
 		return out;
 	}
+
 	let max_x = sample_dims.x - 2;
 	let max_y = sample_dims.y - 2;
 	let max_z = sample_dims.z - 2;
+
 	for p in positions.iter() {
 		let mut cx = p[0].floor() as i32;
 		let mut cy = p[1].floor() as i32;
 		let mut cz = p[2].floor() as i32;
+
 		if cx < 0 {
 			cx = 0;
 		}
+
 		if cy < 0 {
 			cy = 0;
 		}
+
 		if cz < 0 {
 			cz = 0;
 		}
+
 		if cx as u32 > max_x {
 			cx = max_x as i32;
 		}
+
 		if cy as u32 > max_y {
 			cy = max_y as i32;
 		}
+
 		if cz as u32 > max_z {
 			cz = max_z as i32;
 		}
+
 		let cx = cx as u32;
 		let cy = cy as u32;
 		let cz = cz as u32;
@@ -130,13 +151,16 @@ pub fn select_vertex_materials_from_positions_arrays(
 					let idx = linear_index(x, y, z, sample_dims);
 					let v = sdf[idx].abs();
 					let m = mat[idx];
+
 					if m != AIR_ID {
 						any_non_air = true;
 					}
+
 					if m != AIR_ID && v < non_air_best_abs {
 						non_air_best_abs = v;
 						non_air_best_mat = m;
 					}
+
 					if v < min_abs - 1e-7 {
 						min_abs = v;
 						tie_count = 0;
@@ -151,28 +175,36 @@ pub fn select_vertex_materials_from_positions_arrays(
 		}
 
 		let mut chosen_mat = mat[tie_indices[0]];
+
 		if tie_count > 1 {
 			// Majority material among ties
 			let mut counts: [u32; 256] = [0; 256];
+
 			for i in 0..tie_count {
 				let m = mat[tie_indices[i]] as usize;
 				counts[m] += 1;
 			}
+
 			let mut best_m: usize = chosen_mat as usize;
 			let mut best_c: u32 = counts[best_m];
+
 			for (m, &c) in counts.iter().enumerate() {
 				if c > best_c {
 					best_c = c;
 					best_m = m;
 				}
 			}
+
 			chosen_mat = best_m as u8;
 		}
+
 		if chosen_mat == AIR_ID && any_non_air {
 			chosen_mat = non_air_best_mat;
 		}
+
 		out.push(chosen_mat);
 	}
+
 	out
 }
 
@@ -190,7 +222,9 @@ pub fn select_vertex_materials_from_positions(
 }
 
 #[cfg(test)]
+
 mod tests {
+
 	use super::*;
 
 	#[test]

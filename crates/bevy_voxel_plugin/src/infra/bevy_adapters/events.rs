@@ -1,6 +1,7 @@
 //! Bevy event adapters
 
 use crate::voxel::{EditOperation, SdfSphere};
+
 use bevy::prelude::*;
 
 /// Event for voxel editing

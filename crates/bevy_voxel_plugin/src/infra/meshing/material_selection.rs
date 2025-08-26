@@ -47,6 +47,7 @@ fn select_material_at_position(chunk: &VoxelChunk, pos: &[f32; 3]) -> MaterialId
 
 				if mat != MaterialId::AIR {
 					any_non_air = true;
+
 					if abs_sdf < min_abs_sdf || non_air_material == MaterialId::AIR {
 						non_air_material = mat;
 					}

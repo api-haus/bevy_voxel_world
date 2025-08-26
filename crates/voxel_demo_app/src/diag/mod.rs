@@ -1,5 +1,7 @@
 use bevy::app::{App, Plugin};
+
 use bevy::diagnostic::*;
+
 use bevy::render::diagnostic;
 
 pub mod onscreen;

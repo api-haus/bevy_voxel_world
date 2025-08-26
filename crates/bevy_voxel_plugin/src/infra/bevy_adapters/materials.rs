@@ -1,7 +1,9 @@
 //! Material handling for voxel rendering
 
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+
 use bevy::prelude::*;
+
 use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 
 /// Resource holding the voxel material

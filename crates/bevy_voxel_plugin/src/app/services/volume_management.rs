@@ -1,7 +1,8 @@
 //! Volume management service
 
 use crate::app::commands::{CreateVolumeCommand, EditVoxelsCommand, SeedVolumeCommand};
-use crate::voxel::{ports::*, ChunkCoords, VolumeConfig, VoxelVolume};
+
+use crate::voxel::{ChunkCoords, VolumeConfig, VoxelVolume, ports::*};
 
 /// Service for managing voxel volumes
 pub struct VolumeManagementService<R: RandomGenerator> {
@@ -36,7 +37,7 @@ impl<R: RandomGenerator> VolumeManagementService<R> {
 
 	/// Get chunks that need meshing
 	pub fn chunks_needing_mesh(&self) -> Vec<ChunkCoords> {
-		use crate::app::queries::{execute_find_chunks_needing_mesh, FindChunksNeedingMeshQuery};
+		use crate::app::queries::{FindChunksNeedingMeshQuery, execute_find_chunks_needing_mesh};
 		execute_find_chunks_needing_mesh(FindChunksNeedingMeshQuery, &self.volume)
 	}
 }

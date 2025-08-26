@@ -4,9 +4,13 @@
 //! It acts as the boundary between the pure domain and the infrastructure.
 
 pub mod commands;
+
 pub mod queries;
+
 pub mod services;
 
 // Re-export commonly used items
+
 pub use commands::*;
+
 pub use queries::*;

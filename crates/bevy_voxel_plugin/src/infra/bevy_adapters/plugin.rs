@@ -1,7 +1,9 @@
 //! Bevy plugin implementation
 
 use super::materials;
+
 use super::systems;
+
 use bevy::prelude::*;
 
 /// The main Bevy plugin for the voxel system

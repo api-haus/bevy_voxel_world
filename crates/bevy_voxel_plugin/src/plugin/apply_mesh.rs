@@ -1,12 +1,19 @@
 use avian3d::prelude::{Collider, RigidBody};
+
 use bevy::prelude::*;
+
 use bevy::render::mesh::Mesh;
+
 use std::time::Instant;
+
 use tracing::{info_span, trace};
 
 use crate::voxel_plugin::meshing::bevy_mesh::buffer_to_meshes_per_material;
+
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions;
+
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
+
 use ilattice::prelude::IVec3 as ILVec3;
 
 pub(crate) fn apply_remeshes(
@@ -21,6 +28,7 @@ pub(crate) fn apply_remeshes(
 	let Some(render_mat) = render_mat else {
 		return;
 	};
+
 	for ev in evr.read() {
 		let span = info_span!(
 				"apply_mesh",
@@ -54,6 +62,7 @@ pub(crate) fn apply_remeshes(
 		};
 
 		let meshes_vec = buffer_to_meshes_per_material(&ev.buffer, vertex_colors.as_deref());
+
 		if meshes_vec.is_empty() {
 			// trace!(target: "vox", "apply_mesh: empty meshes_vec for entity {:?}", ev.entity);
 			commands
@@ -61,6 +70,7 @@ pub(crate) fn apply_remeshes(
 				.remove::<super::NeedsInitialMesh>();
 			continue;
 		}
+
 		let mesh = meshes_vec.into_iter().next().unwrap();
 		trace!("compute_aabb_begin");
 		// info!(target: "vox", "apply_mesh: mesh bounds {:?} for entity {:?}", aabb, ev.entity);
@@ -89,12 +99,14 @@ pub(crate) fn apply_remeshes(
 
 			if let Some(mesh_ref) = meshes.get(mesh_id) {
 				trace!("collider_build_begin");
+
 				if let Some(collider) = Collider::trimesh_from_mesh(mesh_ref) {
 					commands
 						.entity(ev.entity)
 						.insert((RigidBody::Static, collider));
 				}
 			}
+
 			telemetry.total_meshed += 1;
 			telemetry.meshed_this_frame += 1;
 			telemetry.apply_time_ms_frame += t0.elapsed().as_secs_f32() * 1000.0;

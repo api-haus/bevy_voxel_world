@@ -1,10 +1,12 @@
 //! System for handling voxel edit events
 
 use crate::app::commands::EditVoxelsCommand;
+
 use crate::infra::bevy_adapters::{
 	MeshServiceResource, NeedsRemesh, VolumeServiceResource, VoxelChunkComponent, VoxelChunkData,
 	VoxelEditEvent,
 };
+
 use bevy::prelude::*;
 
 pub fn handle_edit_events_system(
@@ -31,6 +33,7 @@ pub fn handle_edit_events_system(
 			if modified_coords.contains(&chunk_comp.coords) {
 				// Get updated chunk from service
 				let service = volume_service.service.lock().unwrap();
+
 				if let Some(updated_chunk) = service.volume.chunk_at(chunk_comp.coords) {
 					chunk_data.chunk = updated_chunk.clone();
 					commands.entity(entity).insert(NeedsRemesh);

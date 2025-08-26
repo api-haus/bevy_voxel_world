@@ -1,6 +1,9 @@
 use bevy::input::gamepad::GamepadAxis;
+
 use bevy::input::mouse::MouseMotion;
+
 use bevy::prelude::*;
+
 use bevy_voxel_plugin::plugin::VoxelVolumeDesc;
 
 pub struct OrbitCamPlugin;
@@ -69,6 +72,7 @@ pub fn mouse_orbit(
 	axes: Option<Res<Axis<GamepadAxis>>>,
 ) {
 	let mut look = Vec2::ZERO;
+
 	for ev in mouse_motion.read() {
 		look += ev.delta;
 	}
@@ -82,6 +86,7 @@ pub fn mouse_orbit(
 		(0.0, 0.0)
 	};
 	look += Vec2::new(gx, -gy) * 8.0;
+
 	if look == Vec2::ZERO {
 		return;
 	}
@@ -110,6 +115,7 @@ pub fn follow_player(
 		return;
 	};
 	let p = player_xf.translation();
+
 	for (mut transform, mut orbit) in q_cam.iter_mut() {
 		orbit.target = p;
 		let dir = Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(orbit.pitch) * Vec3::Z;
@@ -126,6 +132,7 @@ pub fn apply_to_camera(
 	let Ok(orbit_tf) = q_orbit.single() else {
 		return;
 	};
+
 	for mut cam_tf in q_real.iter_mut() {
 		*cam_tf = *orbit_tf;
 	}

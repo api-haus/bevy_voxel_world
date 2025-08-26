@@ -1,10 +1,15 @@
 //! Bevy resource adapters
 
 use crate::app::services::{MeshGenerationService, VolumeManagementService};
+
 use crate::infra::{SurfaceNetsMesher, WyRandGenerator};
+
 use crate::voxel::VolumeConfig;
+
 use bevy::prelude::*;
+
 use bevy_prng::WyRand;
+
 use std::sync::{Arc, Mutex};
 
 /// Resource holding the volume configuration

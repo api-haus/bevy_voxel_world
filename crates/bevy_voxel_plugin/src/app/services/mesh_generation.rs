@@ -1,7 +1,9 @@
 //! Mesh generation service
 
-use crate::app::commands::{execute_remesh_chunk, RemeshChunkCommand};
-use crate::voxel::{ports::Mesher, ChunkCoords, MeshData, VoxelVolume};
+use crate::app::commands::{RemeshChunkCommand, execute_remesh_chunk};
+
+use crate::voxel::{ChunkCoords, MeshData, VoxelVolume, ports::Mesher};
+
 use std::collections::VecDeque;
 
 /// Service for managing mesh generation
@@ -40,10 +42,12 @@ impl<M: Mesher> MeshGenerationService<M> {
 			let command = RemeshChunkCommand {
 				chunk_coords: coords,
 			};
+
 			match execute_remesh_chunk(command, volume, &self.mesher) {
 				Ok(result) => {
 					results.push((coords, result.mesh_data));
 				}
+
 				Err(_) => {
 					// Log error in real implementation
 					results.push((coords, None));

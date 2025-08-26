@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
+
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
+
 use serde::Serialize;
+
 use std::fs;
+
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
@@ -25,13 +29,17 @@ fn is_albedo(name: &str) -> bool {
 
 fn collect_one_per_subdir(root: &Path) -> Result<Vec<PathBuf>> {
 	let mut picks: Vec<PathBuf> = Vec::new();
+
 	for entry in fs::read_dir(root).context("read_dir root")? {
 		let entry = entry?;
+
 		if entry.file_type()?.is_dir() {
 			let mut chosen: Option<PathBuf> = None;
+
 			for sub in fs::read_dir(entry.path()).context("read_dir sub")? {
 				let sub = sub?;
 				let p = sub.path();
+
 				if let Some(name) = p.file_name().and_then(|s| s.to_str())
 					&& is_albedo(name)
 				{
@@ -39,11 +47,13 @@ fn collect_one_per_subdir(root: &Path) -> Result<Vec<PathBuf>> {
 					break;
 				}
 			}
+
 			if let Some(p) = chosen {
 				picks.push(p);
 			}
 		}
 	}
+
 	Ok(picks)
 }
 
@@ -60,25 +70,34 @@ fn main() -> Result<()> {
 	fs::create_dir_all(&out_dir)?;
 
 	let picks = collect_one_per_subdir(&src_root)?;
+
 	if picks.is_empty() {
 		println!("no albedo textures found under {:?}", src_root);
+
 		return Ok(());
 	}
+
 	let mut images: Vec<DynamicImage> = Vec::new();
+
 	for p in &picks {
 		images.push(load_rgba8(p)?);
 	}
+
 	let w = images[0].width();
 	let h = images[0].height();
+
 	for img in &images {
 		if img.width() != w || img.height() != h {
 			return Err(anyhow::anyhow!("dimension mismatch: expected {}x{}", w, h));
 		}
 	}
+
 	let stacked_h = h * images.len() as u32;
 	let mut stacked: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(w, stacked_h);
+
 	for (idx, img) in images.iter().enumerate() {
 		let y_off = (idx as u32) * h;
+
 		for y in 0..h {
 			for x in 0..w {
 				let px = img.get_pixel(x, y);
@@ -86,6 +105,7 @@ fn main() -> Result<()> {
 			}
 		}
 	}
+
 	let out_png = out_dir.join("albedo_array_stacked.png");
 	stacked
 		.save(&out_png)

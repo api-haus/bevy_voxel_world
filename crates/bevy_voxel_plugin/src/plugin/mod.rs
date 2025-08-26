@@ -1,22 +1,35 @@
 use bevy::prelude::*;
+
 use fast_surface_nets::SurfaceNetsBuffer;
+
 use ilattice::prelude::{IVec3, UVec3};
+
 use std::time::Duration;
 
 mod apply_mesh;
+
 mod editing;
+
 mod rendering_materials;
+
 mod scheduler;
+
 pub mod tracing;
+
 mod volume_spawn;
 
 mod authoring {
+
 	pub(crate) use crate::authoring::components::{CsgOp, SdfBox, SdfSphere};
 	pub(crate) use crate::authoring::seed::seed_terrain_noise_sdf;
 }
+
 use apply_mesh::apply_remeshes;
+
 pub use editing::{EditOp, VoxelEditEvent};
+
 pub use rendering_materials::TriplanarExtension;
+
 pub(crate) use rendering_materials::{
 	VoxelRenderMaterial, // Temporarily disabled for iOS debugging
 	init_texture_loading,
@@ -26,6 +39,7 @@ pub(crate) use scheduler::{
 	RemeshBudget, RemeshQueue, drain_queue_and_spawn_jobs, pump_remesh_results,
 };
 pub(crate) use tracing::telemetry::VoxelTelemetry;
+
 use tracing::telemetry::{publish_diagnostics, register_voxel_diagnostics, update_telemetry_begin};
 
 #[derive(Resource, Debug, Clone, Copy)]
@@ -120,11 +134,13 @@ fn enqueue_initial_meshing_on_enter_world(
 	// Clear any leftover queued entities from earlier phases to avoid duplicates
 	queue.inner.clear();
 	let mut count = 0usize;
+
 	for entity in q_chunks.iter() {
 		queue.inner.push_back(entity);
 		commands.entity(entity).insert(NeedsInitialMesh);
 		count += 1;
 	}
+
 	info!(target: "vox", "VoxelLoadingState: entered World, enqueued {} chunks", count);
 }
 
@@ -133,6 +149,7 @@ fn advance_to_ready_when_initial_meshing_done(
 	mut next: ResMut<NextState<VoxelLoadingState>>,
 ) {
 	let pending = q_pending.iter().count();
+
 	if pending == 0 {
 		// info!(target: "vox", "VoxelLoadingState: Ready (initial meshing complete)");
 		next.set(VoxelLoadingState::Ready);
@@ -143,6 +160,7 @@ fn advance_to_ready_when_initial_meshing_done(
 
 fn suppress_fixed_time(mut fixed: ResMut<Time<Fixed>>) {
 	let over = fixed.overstep();
+
 	if over > Duration::ZERO {
 		fixed.discard_overstep(over);
 		trace!(target: "vox", "Fixed time suppressed: discarded overstep {:?}", over);
@@ -155,10 +173,12 @@ fn slow_fixed_time_on_loading(
 	mut commands: Commands,
 ) {
 	let huge = Duration::from_secs(3600);
+
 	if maybe_original.is_none() {
 		let prev = fixed.timestep();
 		commands.insert_resource(OriginalFixedTimestep(prev));
 	}
+
 	fixed.set_timestep(huge);
 	info!(target: "vox", "Fixed time timestep set huge to suppress physics during loading");
 }
@@ -173,10 +193,12 @@ fn restore_fixed_time_on_ready(
 		.map(|o| o.0)
 		.unwrap_or_else(|| Duration::from_micros(15625));
 	fixed.set_timestep(target);
+
 	// Cleanup the saved value to avoid stale restores on next load sequence
 	if maybe_original.is_some() {
 		commands.remove_resource::<OriginalFixedTimestep>();
 	}
+
 	info!(target: "vox", "Fixed time timestep restored to {:?}", target);
 }
 

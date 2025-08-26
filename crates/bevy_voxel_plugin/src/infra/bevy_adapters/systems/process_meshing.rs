@@ -3,10 +3,15 @@
 use crate::infra::bevy_adapters::{
 	MeshReady, MeshServiceResource, MeshingBudget, VolumeServiceResource,
 };
+
 use crate::voxel::MaterialId;
+
 use bevy::asset::RenderAssetUsages;
+
 use bevy::prelude::*;
+
 use bevy::render::mesh::{Indices, Mesh};
+
 use bevy::render::render_resource::PrimitiveTopology;
 
 pub fn process_meshing_queue_system(

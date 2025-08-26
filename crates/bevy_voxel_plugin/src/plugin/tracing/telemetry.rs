@@ -1,5 +1,7 @@
 use crate::plugin::RemeshQueue;
+
 use bevy::diagnostic::{Diagnostic, DiagnosticPath, Diagnostics, RegisterDiagnostic};
+
 use bevy::prelude::*;
 
 // Telemetry resource tracking meshing stats

@@ -1,6 +1,7 @@
 //! Voxel editing operations
 
 use crate::voxel::entities::*;
+
 use crate::voxel::types::*;
 
 /// Apply a sphere edit operation to a chunk
@@ -33,6 +34,7 @@ pub fn apply_sphere_edit(
 						// Carve out (make positive)
 						SdfValue(current_sdf.0.max(-sphere_sdf))
 					}
+
 					EditOperation::Place { .. } => {
 						// Add material (make negative)
 						SdfValue(current_sdf.0.min(sphere_sdf))
@@ -49,6 +51,7 @@ pub fn apply_sphere_edit(
 								chunk.set_material(local_pos, MaterialId::AIR);
 							}
 						}
+
 						EditOperation::Place { material } => {
 							if !current_sdf.is_solid() && new_sdf.is_solid() {
 								chunk.set_material(local_pos, material);

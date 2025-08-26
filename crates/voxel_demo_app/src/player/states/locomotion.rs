@@ -1,9 +1,13 @@
 use bevy::prelude::*;
+
 use bevy_tnua::prelude::*;
+
 use leafwing_input_manager::prelude::*;
 
 use crate::player::actions::PlayerAction;
+
 use crate::player::components::{Player, PlayerConfig};
+
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 pub struct Locomotion;
@@ -14,6 +18,7 @@ impl PlayerState for Locomotion {
 
 impl Locomotion {
 	pub fn on_enter() {}
+
 	pub fn on_exit() {}
 
 	#[allow(clippy::type_complexity)]
@@ -86,11 +91,13 @@ impl Locomotion {
 				let smooth = 0.2;
 				let dot = current.dot(target).clamp(-1.0, 1.0);
 				let angle = dot.acos();
+
 				if angle > 1e-4 {
 					let axis = current.cross(target).normalize_or_zero();
 					let step = angle * smooth;
 					let rot = Quat::from_axis_angle(axis, step);
 					let new_dir = (rot * current).normalize_or_zero();
+
 					if new_dir != Vec3::ZERO {
 						player.facing = new_dir;
 					}

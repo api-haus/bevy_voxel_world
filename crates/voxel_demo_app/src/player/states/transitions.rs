@@ -20,6 +20,7 @@ pub fn from_locomotion(
 	}
 	// Toggle into DebugFly
 	let mut debug_fly_toggle = false;
+
 	if let Ok(actions) = q_actions.single()
 		&& actions.just_pressed(&crate::player::actions::PlayerAction::ToggleDebugFly)
 	{
@@ -56,6 +57,7 @@ pub fn from_or_within_climb(
 ) {
 	let in_climb = state.get() == &PlayerMoveState::Climb;
 	let has_contact = q.single().ok().flatten().is_some();
+
 	if !in_climb && has_contact {
 		tracing::info!("transition intent: Locomotion -> Climb (contact)");
 		ev.write(PlayerTransitionIntent {
@@ -85,7 +87,9 @@ pub fn from_debugfly(
 	if state.get() != &PlayerMoveState::DebugFly {
 		return;
 	}
+
 	let mut toggle = false;
+
 	if let Ok(actions) = q_actions.single()
 		&& actions.just_pressed(&crate::player::actions::PlayerAction::ToggleDebugFly)
 	{

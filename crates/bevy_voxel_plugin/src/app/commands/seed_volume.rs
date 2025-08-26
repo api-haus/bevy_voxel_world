@@ -1,6 +1,6 @@
 //! Seed volume with random content
 
-use crate::voxel::{ports::RandomGenerator, services, VoxelVolume};
+use crate::voxel::{VoxelVolume, ports::RandomGenerator, services};
 
 /// Command to seed a volume with random spheres
 #[derive(Debug, Clone)]

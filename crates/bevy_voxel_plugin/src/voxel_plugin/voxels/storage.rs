@@ -1,6 +1,9 @@
 use crate::core::grid::ChunkDims;
+
 use crate::core::index::linear_index;
+
 use bevy::prelude::Component;
+
 use ilattice::prelude::UVec3;
 
 pub const AIR_ID: u8 = 0u8;

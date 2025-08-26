@@ -3,6 +3,7 @@
 use crate::infra::bevy_adapters::{
 	VolumeServiceResource, VoxelChunkComponent, VoxelChunkData, VoxelVolumeMarker,
 };
+
 use bevy::prelude::*;
 
 pub fn spawn_volume_system(mut commands: Commands, volume_service: Res<VolumeServiceResource>) {

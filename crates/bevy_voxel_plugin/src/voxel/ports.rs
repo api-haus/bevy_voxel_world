@@ -1,6 +1,7 @@
 //! Domain ports (traits) for external dependencies
 
 use crate::voxel::entities::*;
+
 use crate::voxel::types::*;
 
 /// Port for mesh generation

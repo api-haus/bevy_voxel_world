@@ -1,24 +1,41 @@
 use avian3d::prelude::*;
+
 use bevy::asset::AssetPlugin;
+
 use bevy::log::{Level, LogPlugin};
+
 use bevy::pbr::{ExtendedMaterial, MaterialPlugin, StandardMaterial};
+
 use bevy::prelude::*;
+
 use bevy::window::WindowMode;
+
 use bevy_prng::WyRand;
+
 use bevy_rand::plugin::EntropyPlugin;
+
 use bevy_tnua::prelude::*;
+
 use bevy_tnua_avian3d::TnuaAvian3dPlugin;
+
 use std::path::{Path, PathBuf};
 
 use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin};
+
 mod atmosphere;
+
 mod camera;
+
 #[cfg(feature = "diagnostics_ui")]
 mod diag;
+
 pub mod orbit_cam;
+
 mod player;
+
 #[cfg(target_os = "ios")]
 use bevy_ios_iap::IosIapPlugin;
+
 #[cfg(target_os = "ios")]
 mod ios_mobile;
 
@@ -37,6 +54,7 @@ pub unsafe extern "C" fn rust_main() {
 pub fn run() {
 	let assets_root: PathBuf = {
 		let mut candidates: Vec<PathBuf> = Vec::new();
+
 		if let Ok(env_override) = std::env::var("BEVISTER_ASSETS") {
 			candidates.push(PathBuf::from(env_override));
 		}
@@ -81,6 +99,7 @@ pub fn run() {
 				..default()
 			});
 		}
+
 		p
 	});
 

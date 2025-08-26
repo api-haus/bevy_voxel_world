@@ -1,7 +1,9 @@
 //! System for applying generated meshes to entities
 
 use crate::infra::bevy_adapters::{MeshReady, NeedsRemesh, VoxelChunkComponent};
+
 use crate::voxel::services;
+
 use bevy::prelude::*;
 
 pub fn apply_generated_meshes_system(

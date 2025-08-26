@@ -1,6 +1,6 @@
 //! Edit voxels command
 
-use crate::voxel::{services, EditOperation, SdfSphere, VoxelVolume};
+use crate::voxel::{EditOperation, SdfSphere, VoxelVolume, services};
 
 /// Command to edit voxels using a sphere
 #[derive(Debug, Clone)]
