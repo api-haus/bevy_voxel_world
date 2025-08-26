@@ -1,9 +1,7 @@
 ---
-description:
-globs:
-alwaysApply: true
+globs: crates/**,docs/**
+alwaysApply: false
 ---
-
 ## Code Change Protocol
 
 **IMPORTANT**: Before implementing any code changes or modifications, you MUST:

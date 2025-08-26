@@ -1,4 +1,6 @@
-use bevy::pbr::{MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
+use bevy::pbr::{
+	ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+};
 use bevy::prelude::*;
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{
@@ -14,7 +16,7 @@ pub(crate) struct LoadingTexture {
 
 #[derive(Resource, Clone)]
 pub(crate) struct VoxelRenderMaterial {
-	pub(crate) handle: Handle<StandardMaterial>,
+	pub(crate) handle: Handle<ExtendedMaterial<StandardMaterial, TriplanarExtension>>,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -47,7 +49,7 @@ impl Default for TriplanarExtension {
 	fn default() -> Self {
 		Self {
 			albedo_array: Default::default(),
-			tiling_scale: 0.08,
+			tiling_scale: 0.5,
 			albedo_layer_count: 1,
 			debug_mat_vis: false,
 		}
@@ -68,48 +70,25 @@ impl MaterialExtension for TriplanarExtension {
 		_layout: &MeshVertexBufferLayoutRef,
 		key: MaterialExtensionKey<Self>,
 	) -> Result<(), SpecializedMeshPipelineError> {
-		if let Some(fragment) = descriptor.fragment.as_mut() {
-			if key.bind_group_data.debug_mat_vis {
-				fragment.shader_defs.push("DEBUG_MAT_VIS".into());
-			}
+		if let Some(fragment) = descriptor.fragment.as_mut()
+			&& key.bind_group_data.debug_mat_vis
+		{
+			fragment.shader_defs.push("DEBUG_MAT_VIS".into());
 		}
 		Ok(())
 	}
 }
 
-// Temporary simple material for debugging iOS issues
-pub(crate) fn init_simple_material(
-	mut commands: Commands,
-	mut materials: ResMut<Assets<StandardMaterial>>,
-	maybe_existing: Option<Res<VoxelRenderMaterial>>,
-) {
-	if maybe_existing.is_some() {
-		info!(target: "vox", "init_simple_material: material already exists");
-		return;
-	}
-
-	info!(target: "vox", "init_simple_material: creating simple debug material");
-	let handle = materials.add(StandardMaterial {
-		base_color: Color::srgb(0.8, 0.7, 0.6), // Light brown color
-		perceptual_roughness: 0.8,
-		metallic: 0.0,
-		..Default::default()
-	});
-
-	commands.insert_resource(VoxelRenderMaterial { handle });
-	info!(target: "vox", "init_simple_material: material created successfully");
-}
-
 pub(crate) fn init_voxel_material_when_ready(
 	mut commands: Commands,
-	mut materials: ResMut<Assets<StandardMaterial>>,
+	mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, TriplanarExtension>>>,
 	mut images: ResMut<Assets<Image>>,
 	asset_server: Res<AssetServer>,
 	mut loading_texture: ResMut<LoadingTexture>,
 	maybe_existing: Option<Res<VoxelRenderMaterial>>,
 ) {
 	if maybe_existing.is_some() {
-		info!(target: "vox", "init_voxel_material_when_ready: material already exists");
+		// info!(target: "vox", "init_voxel_material_when_ready: material already exists");
 		return;
 	}
 
@@ -119,7 +98,7 @@ pub(crate) fn init_voxel_material_when_ready(
 	}
 
 	if !load_state.is_loaded() {
-		info!(target: "vox", "init_voxel_material_when_ready: texture not loaded yet, state={:?}", load_state);
+		debug!(target: "vox", "voxel_mat_waiting texture not loaded yet, state={:?}", load_state);
 		return;
 	}
 	loading_texture.is_loaded = true;
@@ -130,29 +109,20 @@ pub(crate) fn init_voxel_material_when_ready(
 	let height = image.texture_descriptor.size.height;
 	let layers = (height / width).max(1);
 	image.reinterpret_stacked_2d_as_array(layers);
+	debug!(target: "vox", "voxel_mat_image_reinterpreted as array layers={}", layers);
 
-	// let handle = materials.add(ExtendedMaterial {
-	// 	base: StandardMaterial {
-	// 		base_color: Color::WHITE,
-	// 		base_color_texture: None,
-	// 		perceptual_roughness: 0.8,
-	// 		metallic: 0.0,
-	// 		..Default::default()
-	// 	},
-	// 	extension: TriplanarExtension {
-	// 		albedo_array: loading_texture.handle.clone(),
-	// 		tiling_scale: 0.1,
-	// 		albedo_layer_count: layers,
-	// 		debug_mat_vis: true,
-	// 	},
-	// });
-
-	let handle = materials.add(StandardMaterial {
-		base_color: Color::WHITE,
-		base_color_texture: None,
-		perceptual_roughness: 0.8,
-		metallic: 0.0,
-		..Default::default()
+	let handle = materials.add(ExtendedMaterial {
+		base: StandardMaterial {
+			base_color: Color::WHITE,
+			base_color_texture: None,
+			perceptual_roughness: 0.8,
+			metallic: 0.0,
+			..Default::default()
+		},
+		extension: TriplanarExtension {
+			albedo_array: loading_texture.handle.clone(),
+			..Default::default()
+		},
 	});
 
 	commands.insert_resource(VoxelRenderMaterial { handle });

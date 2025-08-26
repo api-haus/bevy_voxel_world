@@ -4,10 +4,10 @@ use bevy_rand::global::GlobalEntropy;
 use ilattice::prelude::{IVec3 as ILVec3, UVec3};
 use rand::Rng;
 use rayon::prelude::*;
-use tracing::{debug, info_span, trace};
+use tracing::{debug, info, info_span, trace};
 
 use crate::core::index::linear_index;
-use crate::voxel_plugin::voxels::storage::{VoxelStorage, AIR_ID};
+use crate::voxel_plugin::voxels::storage::{AIR_ID, VoxelStorage};
 
 /// Simple integer hash mix (wyhash-inspired) for generating deterministic noise
 #[inline]
@@ -53,7 +53,8 @@ pub(crate) fn seed_random_spheres_sdf(
 			origin = ?desc.origin_cell
 	);
 	let _enter = span.enter();
-	info!(target: "vox", "seed_random_spheres_sdf: starting seeding for {} chunks", q_chunks.iter().count());
+	let chunks_total = q_chunks.iter().count();
+	info!(target: "vox", "seed_random_spheres_sdf: begin, chunks_total={}", chunks_total);
 	let vol_shape = ILVec3::new(
 		(desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
 		(desc.grid_dims.y * desc.chunk_core_dims.y) as i32,
@@ -110,7 +111,7 @@ pub(crate) fn seed_random_spheres_sdf(
 		})
 		.collect();
 
-	debug!("seed_tasks count={}", tasks.len());
+	debug!("seed_tasks spheres={}, tasks={}", sphere_count, tasks.len());
 	let results: Vec<(Entity, Vec<f32>, Vec<u8>)> = tasks
 		.par_iter()
 		.map(|task| {
@@ -145,7 +146,7 @@ pub(crate) fn seed_random_spheres_sdf(
 				return (task.entity, sdf, mat);
 			}
 
-			let mut any_solid = false;
+			let mut _any_solid = false;
 			for z in 0..sz {
 				for y in 0..sy {
 					for x in 0..sx {
@@ -170,7 +171,7 @@ pub(crate) fn seed_random_spheres_sdf(
 						}
 						sdf[idx] = dmin;
 						mat[idx] = if dmin <= 0.0 {
-							any_solid = true;
+							_any_solid = true;
 							material_from_noise(p)
 						} else {
 							AIR_ID
@@ -179,26 +180,22 @@ pub(crate) fn seed_random_spheres_sdf(
 				}
 			}
 
-			if any_solid {
-				trace!(target: "vox", "seed_chunk_solid entity={:?}", task.entity);
-			} else {
-				trace!(target: "vox", "seed_chunk_no_solid entity={:?}", task.entity);
-			}
-
 			(task.entity, sdf, mat)
 		})
 		.collect();
 
+	let mut enq = 0usize;
 	for (entity, sdf, mat) in results.into_iter() {
 		if let Ok((e, mut storage, _chunk)) = q_chunks.get_mut(entity) {
 			storage.sdf.copy_from_slice(&sdf);
 			storage.mat.copy_from_slice(&mat);
 			queue.inner.push_back(e);
 			trace!(target: "vox", "seed_chunk_enqueued entity={:?}", e);
+			enq += 1;
 		}
 	}
 
-	info!(target: "vox", "seed_random_spheres_sdf: completed seeding, {} chunks queued for meshing", queue.inner.len());
+	info!(target: "vox", "seed_random_spheres_sdf: end, enqueued={} of {}", enq, chunks_total);
 }
 
 /// Terrain heightfield with random rotated cubes embedded.
@@ -216,7 +213,8 @@ pub(crate) fn seed_terrain_noise_sdf(
 			origin = ?desc.origin_cell
 	);
 	let _enter = span.enter();
-	info!(target: "vox", "seed_terrain_noise_sdf: starting seeding for {} chunks", q_chunks.iter().count());
+	let chunks_total = q_chunks.iter().count();
+	info!(target: "vox", "seed_terrain_noise_sdf: begin, chunks_total={}", chunks_total);
 
 	let vol_shape = ILVec3::new(
 		(desc.grid_dims.x * desc.chunk_core_dims.x) as i32,
@@ -367,7 +365,7 @@ pub(crate) fn seed_terrain_noise_sdf(
 				.copied()
 				.collect();
 
-			let mut any_solid = false;
+			let any_solid = false;
 			for z in 0..sz {
 				for y in 0..sy {
 					for x in 0..sx {
@@ -408,14 +406,16 @@ pub(crate) fn seed_terrain_noise_sdf(
 		})
 		.collect();
 
+	let mut enq = 0usize;
 	for (entity, sdf, mat) in results.into_iter() {
 		if let Ok((e, mut storage, _chunk)) = q_chunks.get_mut(entity) {
 			storage.sdf.copy_from_slice(&sdf);
 			storage.mat.copy_from_slice(&mat);
 			queue.inner.push_back(e);
 			trace!(target: "vox", "seed_chunk_enqueued entity={:?}", e);
+			enq += 1;
 		}
 	}
 
-	info!(target: "vox", "seed_terrain_noise_sdf: completed seeding, {} chunks queued for meshing", queue.inner.len());
+	info!(target: "vox", "seed_terrain_noise_sdf: end, enqueued={} of {}", enq, chunks_total);
 }

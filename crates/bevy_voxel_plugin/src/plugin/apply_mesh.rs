@@ -33,6 +33,14 @@ pub(crate) fn apply_remeshes(
 		let _enter = span.enter();
 		let t0 = Instant::now();
 
+		// If buffer is empty (no surface), mark done and continue
+		if ev.buffer.positions.is_empty() {
+			commands
+				.entity(ev.entity)
+				.remove::<super::NeedsInitialMesh>();
+			continue;
+		}
+
 		let vertex_colors: Option<Vec<[f32; 4]>> = if let Some(colors) = &ev.vertex_colors {
 			Some(colors.clone())
 		} else if let Ok((_chunk, storage, _tf)) = q_chunk_tf.get_mut(ev.entity) {
@@ -49,13 +57,16 @@ pub(crate) fn apply_remeshes(
 
 		let meshes_vec = buffer_to_meshes_per_material(&ev.buffer, vertex_colors.as_deref());
 		if meshes_vec.is_empty() {
-			info!(target: "vox", "apply_mesh: empty meshes_vec for entity {:?}", ev.entity);
+			// trace!(target: "vox", "apply_mesh: empty meshes_vec for entity {:?}", ev.entity);
+			commands
+				.entity(ev.entity)
+				.remove::<super::NeedsInitialMesh>();
 			continue;
 		}
 		let mesh = meshes_vec.into_iter().next().unwrap();
 		trace!("compute_aabb_begin");
 		let aabb = mesh.compute_aabb();
-		info!(target: "vox", "apply_mesh: mesh bounds {:?} for entity {:?}", aabb, ev.entity);
+		// info!(target: "vox", "apply_mesh: mesh bounds {:?} for entity {:?}", aabb, ev.entity);
 		let mesh_handle = meshes.add(mesh);
 		let mesh_id = mesh_handle.id();
 
@@ -69,11 +80,15 @@ pub(crate) fn apply_remeshes(
 			let min = desc.origin_cell + offset - ILVec3::ONE;
 			transform.translation = Vec3::new(min.x as f32, min.y as f32, min.z as f32);
 
-			info!(target: "vox", "apply_mesh: adding mesh to entity {:?} at position {:?}", ev.entity, transform.translation);
+			// info!(target: "vox", "apply_mesh: adding mesh to entity {:?} at position {:?}", ev.entity, transform.translation);
 			commands.entity(ev.entity).insert((
 				Mesh3d(mesh_handle.clone()),
 				MeshMaterial3d(render_mat.handle.clone()),
 			));
+			// Mark initial meshing done for loading state tracking
+			commands
+				.entity(ev.entity)
+				.remove::<super::NeedsInitialMesh>();
 
 			if let Some(mesh_ref) = meshes.get(mesh_id) {
 				trace!("collider_build_begin");
@@ -95,53 +110,11 @@ pub(crate) fn apply_remeshes(
 pub(crate) fn initial_sync_remesh_and_apply(
 	desc: Res<super::VoxelVolumeDesc>,
 	render_mat: Option<Res<super::VoxelRenderMaterial>>,
-	mut telemetry: ResMut<super::VoxelTelemetry>,
-	mut meshes: ResMut<Assets<Mesh>>,
-	mut commands: Commands,
-	mut q_chunk: Query<(Entity, &super::VoxelChunk, &VoxelStorage, &mut Transform)>,
+	telemetry: ResMut<super::VoxelTelemetry>,
+	meshes: ResMut<Assets<Mesh>>,
+	commands: Commands,
+	q_chunk: Query<(Entity, &super::VoxelChunk, &VoxelStorage, &mut Transform)>,
 ) {
-	let Some(render_mat) = render_mat else {
-		info!(target: "vox", "initial_sync_remesh_and_apply: skipping - render material not ready");
-		return;
-	};
-	let mut applied_count = 0usize;
-	for (entity, chunk, storage, mut transform) in q_chunk.iter_mut() {
-		if let Some(buffer) = remesh_chunk_dispatch(storage) {
-			let vmat = select_vertex_materials_from_positions(storage, &buffer.positions);
-			let vertex_colors: Vec<[f32; 4]> = vmat
-				.iter()
-				.map(|&m| [(m as f32) / 255.0, 0.0, 0.0, 1.0])
-				.collect();
-			let meshes_vec = buffer_to_meshes_per_material(&buffer, Some(&vertex_colors));
-			if let Some(mesh) = meshes_vec.into_iter().next() {
-				let mesh_handle = meshes.add(mesh);
-				let core = desc.chunk_core_dims;
-				let offset = ILVec3::new(
-					(core.x as i32) * chunk.chunk_coords.x,
-					(core.y as i32) * chunk.chunk_coords.y,
-					(core.z as i32) * chunk.chunk_coords.z,
-				);
-				let min = desc.origin_cell + offset - ILVec3::ONE;
-				transform.translation = Vec3::new(min.x as f32, min.y as f32, min.z as f32);
-
-				// Insert mesh + material
-				commands.entity(entity).insert((
-					Mesh3d(mesh_handle.clone()),
-					MeshMaterial3d(render_mat.handle.clone()),
-				));
-
-				// Build collider from mesh
-				if let Some(mesh_ref) = meshes.get(mesh_handle.id()) {
-					if let Some(collider) = Collider::trimesh_from_mesh(mesh_ref) {
-						commands
-							.entity(entity)
-							.insert((RigidBody::Static, collider));
-					}
-				}
-				applied_count += 1;
-			}
-		}
-	}
-	telemetry.total_meshed += applied_count as u64;
-	telemetry.meshed_this_frame += applied_count as u32;
+	// Deprecated: replaced by async queued flow governed by VoxelLoadingState.
+	let _ = (desc, render_mat, telemetry, meshes, commands, q_chunk);
 }

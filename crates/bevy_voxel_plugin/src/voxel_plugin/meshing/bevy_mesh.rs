@@ -21,11 +21,10 @@ pub fn buffer_to_meshes_per_material(
 	if !buffer.normals.is_empty() {
 		mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, buffer.normals.clone());
 	}
-	if let Some(colors) = vertex_colors {
-		if colors.len() == buffer.positions.len() {
+	if let Some(colors) = vertex_colors
+		&& colors.len() == buffer.positions.len() {
 			mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors.to_vec());
 		}
-	}
 	mesh.insert_indices(Indices::U32(buffer.indices.clone()));
 
 	vec![mesh]

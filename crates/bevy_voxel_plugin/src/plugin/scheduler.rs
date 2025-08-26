@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{info_span, trace};
+use tracing::{debug, info, info_span, trace};
 
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions_arrays;
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
@@ -73,16 +73,18 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 		processed += 1;
 
 		let Ok(storage) = q_storage.get(entity) else {
+			trace!(target: "vox", "remesh_drain: storage missing for entity={:?}", entity);
 			continue;
 		};
 		let s = storage.dims.sample;
 		if !(s.x == 18 && s.y == 18 && s.z == 18) {
+			trace!(target: "vox", "remesh_drain: skipping entity={:?} unexpected dims={:?}", entity, s);
 			continue;
 		}
 
 		// Copy SDF and materials to move into the rayon task
-		let sdf: Vec<f32> = storage.sdf.iter().copied().collect();
-		let mat: Vec<u8> = storage.mat.iter().copied().collect();
+		let sdf: Vec<f32> = storage.sdf.to_vec();
+		let mat: Vec<u8> = storage.mat.to_vec();
 		let tx = channels.tx.clone();
 		let job_span = info_span!("remesh_job_spawn", entity = ?entity, sample_dims = ?s);
 		let _job_enter = job_span.enter();
@@ -93,7 +95,7 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 			let fsn_span = info_span!("fsn_run", entity = ?entity, sample_dims = ?s);
 			let _fsn_enter = fsn_span.enter();
 			let fsn_start = Instant::now();
-			// Early skip
+			// Early skip when the SDF has no zero-crossing (no surface)
 			let mut any_pos = false;
 			let mut any_neg = false;
 			for &v in &sdf {
@@ -108,6 +110,12 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 			}
 			if !(any_pos && any_neg) {
 				trace!(target: "vox", "fsn_early_skip entity={:?}", entity);
+				// Signal completion with empty buffer so loading can advance
+				let _ = tx.send(super::RemeshReady {
+					entity,
+					buffer: SurfaceNetsBuffer::default(),
+					vertex_colors: None,
+				});
 				return;
 			}
 
@@ -123,6 +131,12 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 			let dur_ms = fsn_start.elapsed().as_secs_f32() * 1000.0;
 			if buffer.positions.is_empty() {
 				trace!(target: "vox", "fsn_empty_output entity={:?} duration_ms={:.3}", entity, dur_ms);
+				// Signal completion with empty buffer
+				let _ = tx.send(super::RemeshReady {
+					entity,
+					buffer,
+					vertex_colors: None,
+				});
 				return;
 			}
 			trace!(target: "vox", "fsn_done entity={:?} positions={} indices={} duration_ms={:.3}", entity, buffer.positions.len(), buffer.indices.len(), dur_ms);
@@ -141,6 +155,7 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 			});
 		});
 	}
+	debug!(target: "vox", "remesh_drain: processed={} queue_remaining={}", processed, queue.inner.len());
 }
 
 // Pump results from background tasks into the Bevy event queue
@@ -153,8 +168,10 @@ pub(crate) fn pump_remesh_results(
 ) {
 	// Defer draining until voxel material is ready to avoid dropping results before meshes can be applied
 	if maybe_render_mat.is_none() {
+		trace!(target: "vox", "pump_remesh_results: material not ready; deferring pump");
 		return;
 	}
+	let mut pumped = 0usize;
 	loop {
 		let Ok(guard) = channels.rx.lock() else { break };
 		match guard.try_recv() {
@@ -166,9 +183,13 @@ pub(crate) fn pump_remesh_results(
 				}
 				telemetry.jobs_completed_frame = telemetry.jobs_completed_frame.saturating_add(1);
 				evw.write(result);
+				pumped += 1;
 			}
 			Err(std::sync::mpsc::TryRecvError::Empty) => break,
 			Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
 		}
+	}
+	if pumped > 0 {
+		debug!(target: "vox", "pump_remesh_results: pumped={} events", pumped);
 	}
 }
