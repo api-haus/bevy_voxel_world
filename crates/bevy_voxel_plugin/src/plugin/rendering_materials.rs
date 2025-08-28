@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use bevy::pbr::{
 	ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
 };
@@ -100,8 +99,6 @@ pub(crate) fn init_voxel_material_when_ready(
 	maybe_existing: Option<Res<VoxelRenderMaterial>>,
 ) {
 	if maybe_existing.is_some() {
-		// info!(target: "vox", "init_voxel_material_when_ready: material already
-		// exists");
 		return;
 	}
 
@@ -112,7 +109,6 @@ pub(crate) fn init_voxel_material_when_ready(
 	}
 
 	if !load_state.is_loaded() {
-		debug!(target: "vox", "voxel_mat_waiting texture not loaded yet, state={:?}", load_state);
 		return;
 	}
 

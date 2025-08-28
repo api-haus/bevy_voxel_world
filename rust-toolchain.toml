@@ -1,6 +1,6 @@
 [toolchain]
 channel = "nightly"
-components = ["rustfmt", "clippy", "rust-analyzer"]
+components = ["rustfmt", "clippy", "rust-analyzer", "rustc-codegen-cranelift"]
 targets = [
 	"wasm32-unknown-unknown",
 	"aarch64-apple-darwin",

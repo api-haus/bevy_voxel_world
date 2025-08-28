@@ -1,19 +1,9 @@
 use bevy::core_pipeline::{bloom::Bloom, tonemapping::Tonemapping};
-
 use bevy::pbr::{Atmosphere, AtmosphereSettings};
-
 use bevy::prelude::*;
-
 use bevy::render::camera::Exposure;
 
-#[allow(dead_code)]
 pub struct CameraPlugin;
-
-#[derive(SystemSet, Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[allow(dead_code)]
-pub enum CameraSet {
-	Startup,
-}
 
 impl Plugin for CameraPlugin {
 	fn build(&self, app: &mut App) {
@@ -36,7 +26,8 @@ pub fn ensure_render_camera(mut commands: Commands, q: Query<Entity, With<Camera
 	}
 }
 
-/// Sets up camera rendering components for atmospheric scattering and post-processing
+/// Sets up camera rendering components for atmospheric scattering and
+/// post-processing
 #[allow(dead_code)]
 pub fn setup_camera_rendering(mut commands: Commands, camera_query: Query<Entity, With<Camera3d>>) {
 	// Find the fly camera entity and add rendering components to it

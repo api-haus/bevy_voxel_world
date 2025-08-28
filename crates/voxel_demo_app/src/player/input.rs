@@ -22,16 +22,14 @@ pub fn update_player_input(
 	mut q: Query<(&mut ActionState<PlayerAction>, &mut PlayerInput), With<Player>>,
 ) {
 	for (mut actions, mut input) in q.iter_mut() {
-		let mut v = actions.axis_pair(&PlayerAction::Move2D);
+		// Compute a fresh movement vector from hardware each frame to avoid latching
+		let x =
+			(keyboard.pressed(KeyCode::KeyD) as i32 - keyboard.pressed(KeyCode::KeyA) as i32) as f32;
+		let y =
+			(keyboard.pressed(KeyCode::KeyW) as i32 - keyboard.pressed(KeyCode::KeyS) as i32) as f32;
+		let mut v = Vec2::new(x, y);
 
-		if v == Vec2::ZERO {
-			let x =
-				(keyboard.pressed(KeyCode::KeyD) as i32 - keyboard.pressed(KeyCode::KeyA) as i32) as f32;
-			let y =
-				(keyboard.pressed(KeyCode::KeyW) as i32 - keyboard.pressed(KeyCode::KeyS) as i32) as f32;
-			v = Vec2::new(x, y);
-		}
-
+		// If no keyboard input, try reading a gamepad stick
 		if v == Vec2::ZERO {
 			if let Some(gp) = q_gamepads.iter().next() {
 				let x = gp.get(GamepadAxis::LeftStickX).unwrap_or(0.0);

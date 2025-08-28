@@ -6,7 +6,6 @@ use bevy::render::diagnostic;
 
 pub mod onscreen;
 
-#[allow(dead_code)]
 pub struct DiagPlugin;
 
 impl Plugin for DiagPlugin {

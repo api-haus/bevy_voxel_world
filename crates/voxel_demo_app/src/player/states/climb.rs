@@ -10,7 +10,6 @@ use crate::player::input::PlayerInput;
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 #[derive(Component, Default, Clone, Copy)]
-#[cfg_attr(not(feature = "debug_gizmos"), allow(dead_code))]
 pub struct ClimbContact {
 	pub point: Vec3,
 	pub normal: Vec3,
@@ -18,11 +17,7 @@ pub struct ClimbContact {
 }
 
 #[derive(Component, Default)]
-#[allow(dead_code)]
-pub struct ClimbSticky {
-	pub enter_accum: f32,
-	pub exit_accum: f32,
-}
+pub struct ClimbSticky;
 
 #[derive(Component, Default)]
 pub struct ClimbSuppress(pub f32);
@@ -136,7 +131,7 @@ pub fn detect_climbable(
 
 	if let Some(c) = contact {
 		commands.entity(ent).insert(c);
-		commands.entity(ent).insert(ClimbSticky::default());
+		commands.entity(ent).insert(ClimbSticky);
 		#[cfg(feature = "debug_gizmos")]
 		{
 			_gizmos.sphere(c.point, 0.1, Color::srgb(1.0, 0.2, 0.2));
@@ -245,6 +240,8 @@ impl Climb {
 		let Some(contact) = contact else {
 			return;
 		};
+		// Ensure all fields are considered used regardless of debug feature gates
+		let _ = contact.point;
 		let normal = contact.normal.normalize_or_zero();
 
 		// Build climb plane basis

@@ -3,8 +3,6 @@ name = "voxel_demo_app"
 version = "0.1.0"
 edition = "2024"
 
-[lib]
-crate-type = ["staticlib", "rlib"]
 
 [features]
 # Diagnostic UI feature - disabled by default on all platforms
@@ -30,7 +28,6 @@ bevy = { workspace = true }
 avian3d = { workspace = true }
 bevy-tnua = { workspace = true }
 bevy-tnua-avian3d = { workspace = true }
-bevy_hanabi = { workspace = true }
 bevy_voxel_plugin = { path = "../bevy_voxel_plugin" }
 bevy_egui = { workspace = true }
 bevy_prng = { workspace = true }
@@ -47,8 +44,7 @@ bevy_ios_iap = { version = "0.7.0" }
 wgpu = "26.0.1"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
-# Disable dynamic linking for library builds; use plain workspace bevy
-bevy = { workspace = true }
+bevy = { workspace = true, features = ["dynamic_linking"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
