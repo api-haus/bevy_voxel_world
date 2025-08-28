@@ -11,6 +11,7 @@ use crate::player::abilities::PlayerAbility;
 use crate::player::actions::{PlayerAction, default_input_map};
 
 use crate::player::components::{Player, PlayerConfig, PlayerDimensions};
+use crate::player::input::PlayerInput;
 
 use crate::player::orientation::visor::attach_player_visor;
 
@@ -61,6 +62,7 @@ pub fn setup_player(
 		default_input_map(),
 		PlayerAbility::abilities_bundle(),
 		PlayerDimensions { height, radius },
+		PlayerInput::default(),
 		PlayerConfig::default(),
 		avian::GravityScale(1.0),
 	));

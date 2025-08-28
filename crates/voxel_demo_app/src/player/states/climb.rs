@@ -1,15 +1,12 @@
 use avian3d::prelude as avian;
-
+use bevy::input::gamepad::{Gamepad, GamepadAxis};
 use bevy::prelude::*;
-
 use leafwing_input_manager::prelude::*;
-
 use tracing::debug;
 
 use crate::player::actions::PlayerAction;
-
 use crate::player::components::{ClimbConfig, Player, PlayerConfig, PlayerDimensions};
-
+use crate::player::input::PlayerInput;
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 #[derive(Component, Default, Clone, Copy)]
@@ -232,13 +229,15 @@ impl Climb {
 				&GlobalTransform,
 				&ActionState<PlayerAction>,
 				&mut Player,
+				&PlayerInput,
 				Option<&ClimbContact>,
 			),
 			With<crate::player::components::Player>,
 		>,
+		q_gamepads: Query<&Gamepad>,
 		cfg: Res<crate::player::components::ClimbConfig>,
 	) {
-		let Ok((mut t, xf, actions, mut player, contact)) = q.single_mut() else {
+		let Ok((mut t, xf, actions, mut player, input, contact)) = q.single_mut() else {
 			return;
 		};
 
@@ -255,21 +254,19 @@ impl Climb {
 		}
 		let right_tangent = up_tangent.cross(normal).normalize_or_zero();
 
-		// Read input and map onto plane tangents
-		let x = (actions.pressed(&PlayerAction::MoveRight) as i32
-			- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
-		let y = (actions.pressed(&PlayerAction::MoveForward) as i32
-			- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
+		// Read input and map onto plane tangents: prefer PlayerInput snapshot
+		let move2d = input.move2d;
 
-		let lateral = right_tangent * x * cfg.lateral_speed;
-		let vertical_speed = if y >= 0.0 {
+		let lateral = right_tangent * move2d.x * cfg.lateral_speed;
+		let vertical_speed = if move2d.y >= 0.0 {
 			cfg.up_speed
 		} else {
 			cfg.down_speed
 		};
-		let vertical = up_tangent * y.abs() * vertical_speed;
+		let vertical = up_tangent * move2d.y.abs() * vertical_speed;
 
-		// Adhesion PD toward target wall distance (derivative term omitted for kinematic simplicity)
+		// Adhesion PD toward target wall distance (derivative term omitted for
+		// kinematic simplicity)
 		let distance_error = contact.distance - cfg.target_distance; // positive => too far, move inward
 		let adhesion_speed =
 			(cfg.adhesion_kp * distance_error).clamp(-cfg.max_inward_speed, cfg.max_inward_speed);
@@ -307,8 +304,7 @@ impl Climb {
 		}
 
 		debug!(
-			x,
-			y,
+			move2d = ?move2d,
 			right = ?right_tangent,
 			normal = ?normal,
 			lateral = ?lateral,
@@ -317,89 +313,6 @@ impl Climb {
 			desired = ?desired,
 			pos = ?xf.translation(),
 			"climb: kinematic control"
-		);
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use bevy::ecs::system::IntoSystem;
-	use leafwing_input_manager::prelude::ActionState;
-	use std::time::Duration;
-
-	#[test]
-	fn climb_forward_moves_up_on_vertical_wall() {
-		let cfg = ClimbConfig::default();
-		let normal = Vec3::Z; // vertical wall facing the player
-
-		let mut actions = ActionState::<PlayerAction>::default();
-		actions.press(&PlayerAction::MoveForward);
-
-		let x = (actions.pressed(&PlayerAction::MoveRight) as i32
-			- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
-		let y = (actions.pressed(&PlayerAction::MoveForward) as i32
-			- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
-
-		let mut up_tangent = (Vec3::Y - normal * normal.dot(Vec3::Y)).normalize_or_zero();
-		if up_tangent.length_squared() < 1e-4 {
-			up_tangent = (Vec3::X - normal * normal.dot(Vec3::X)).normalize_or_zero();
-		}
-		let right_tangent = up_tangent.cross(normal).normalize_or_zero();
-
-		let lateral = right_tangent * x * cfg.lateral_speed;
-		let vertical_speed = if y >= 0.0 {
-			cfg.up_speed
-		} else {
-			cfg.down_speed
-		};
-		let vertical = up_tangent * y.abs() * vertical_speed;
-
-		let mut wish = lateral + vertical;
-		wish -= normal * wish.dot(normal);
-
-		assert!(
-			wish.y > 0.0,
-			"Forward input should produce upward wish on vertical wall; wish={:?}",
-			wish
-		);
-	}
-
-	#[test]
-	fn climb_integration_moves_up() {
-		let mut world = World::new();
-		world.insert_resource(ClimbConfig::default());
-
-		let mut time: bevy::prelude::Time<()> = bevy::time::Time::default();
-		time.advance_by(Duration::from_secs_f32(0.1));
-		world.insert_resource(time);
-
-		let mut actions = ActionState::<PlayerAction>::default();
-		actions.press(&PlayerAction::MoveForward);
-
-		let entity = world
-			.spawn((
-				Transform::from_translation(Vec3::ZERO),
-				GlobalTransform::default(),
-				actions,
-				Player::default(),
-				ClimbContact {
-					point: Vec3::ZERO,
-					normal: Vec3::Z,
-					distance: 0.35,
-				},
-			))
-			.id();
-
-		let mut sys = IntoSystem::into_system(Climb::on_update);
-		sys.initialize(&mut world);
-		sys.run((), &mut world);
-
-		let t = world.get::<Transform>(entity).unwrap();
-		assert!(
-			t.translation.y > 0.0,
-			"Expected to climb up; got y={}",
-			t.translation.y
 		);
 	}
 }

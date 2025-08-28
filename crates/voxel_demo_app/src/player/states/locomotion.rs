@@ -1,13 +1,9 @@
 use bevy::prelude::*;
-
 use bevy_tnua::prelude::*;
 
-use leafwing_input_manager::prelude::*;
-
 use crate::player::actions::PlayerAction;
-
 use crate::player::components::{Player, PlayerConfig};
-
+use crate::player::input::PlayerInput;
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 pub struct Locomotion;
@@ -25,14 +21,13 @@ impl Locomotion {
 	pub fn on_update(
 		_time: Res<Time>,
 		q_cam: Query<&GlobalTransform, (With<Camera3d>, Without<Player>)>,
-		keyboard: Res<ButtonInput<KeyCode>>,
 		mut q_player: Query<
 			(
 				&mut TnuaController,
 				&GlobalTransform,
-				&ActionState<PlayerAction>,
 				&mut Player,
 				&PlayerConfig,
+				&PlayerInput,
 			),
 			With<Player>,
 		>,
@@ -47,14 +42,10 @@ impl Locomotion {
 			}
 		};
 
-		for (mut ctrl, _player_xf, actions, mut player, pconf) in q_player.iter_mut() {
-			let x = (actions.pressed(&PlayerAction::MoveRight) as i32
-				- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
-			let y = (actions.pressed(&PlayerAction::MoveForward) as i32
-				- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
-			let move2d = Vec2::new(x, y).clamp_length_max(1.0);
-			let boosting = actions.pressed(&PlayerAction::Boost);
-			let jump_pressed = actions.pressed(&PlayerAction::Jump) || keyboard.pressed(KeyCode::Space);
+		for (mut ctrl, _player_xf, mut player, pconf, input) in q_player.iter_mut() {
+			let move2d = input.move2d;
+			let boosting = input.boost;
+			let jump_pressed = input.jump;
 
 			let speed = if boosting { 10.0 } else { 6.0 };
 			let yaw_fwd = cam_yaw_forward();

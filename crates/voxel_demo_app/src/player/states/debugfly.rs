@@ -1,9 +1,9 @@
 use avian3d::prelude as avian;
 use bevy::prelude::*;
-use leafwing_input_manager::prelude::ActionState;
 
 use crate::player::actions::PlayerAction;
 use crate::player::components::Player;
+use crate::player::input::PlayerInput;
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 pub struct DebugFly;
@@ -52,7 +52,7 @@ impl DebugFly {
 	pub fn on_update(
 		time: Res<Time>,
 		q_cam: Query<&GlobalTransform, (With<Camera3d>, Without<Player>)>,
-		mut q_player: Query<(&mut Transform, &ActionState<PlayerAction>), With<Player>>,
+		mut q_player: Query<(&mut Transform, &PlayerInput), With<Player>>,
 	) {
 		let cam_yaw_forward = || -> Vec3 {
 			if let Some(xf) = q_cam.iter().next() {
@@ -66,26 +66,21 @@ impl DebugFly {
 		let yaw_fwd = cam_yaw_forward();
 		let yaw_right = yaw_fwd.cross(Vec3::Y).normalize_or_zero();
 
-		for (mut t, actions) in q_player.iter_mut() {
-			let x = (actions.pressed(&PlayerAction::MoveRight) as i32
-				- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
-			let y = (actions.pressed(&PlayerAction::MoveForward) as i32
-				- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
-			let mut wish = yaw_right * x + yaw_fwd * y;
+		for (mut t, input) in q_player.iter_mut() {
+			let move2d = input.move2d;
 
-			if actions.pressed(&PlayerAction::Jump) {
+			let move2d = move2d.clamp_length_max(1.0);
+			let mut wish = yaw_right * move2d.x + yaw_fwd * move2d.y;
+
+			if input.jump {
 				wish += Vec3::Y;
 			}
 
-			if actions.pressed(&PlayerAction::Boost) {
+			if input.boost {
 				wish -= Vec3::Y;
 			}
 
-			let speed = if actions.pressed(&PlayerAction::Boost) {
-				24.0
-			} else {
-				12.0
-			};
+			let speed = if input.boost { 24.0 } else { 12.0 };
 			let dir = wish.normalize_or_zero();
 
 			if dir != Vec3::ZERO {

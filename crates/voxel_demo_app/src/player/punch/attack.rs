@@ -1,16 +1,12 @@
 use bevy::prelude::*;
-
 use bevy_voxel_plugin::plugin::{EditOp, VoxelEditEvent};
-
 use leafwing_abilities::prelude::*;
 use leafwing_input_manager::prelude::*;
 
-use crate::player::actions::PlayerAction;
-
+use super::visualize::PunchGizmo;
 use crate::player::abilities::PlayerAbility;
 use crate::player::components::{Player, PlayerDimensions};
-
-use super::visualize::PunchGizmo;
+use crate::player::input::PlayerInput;
 
 /// Punch attack: destroys voxels in front of the character at chest height.
 pub fn punch_attack(
@@ -24,18 +20,17 @@ pub fn punch_attack(
 		),
 		With<Player>,
 	>,
-	q_actions: Query<&ActionState<PlayerAction>, With<Player>>,
+	q_input: Query<&PlayerInput, With<Player>>,
 	mut commands: Commands,
 ) {
 	let Ok((player_xf, player, dims, mut ability_cds)) = q_player.single_mut() else {
 		return;
 	};
-	let Ok(actions) = q_actions.single() else {
+	let Ok(input) = q_input.single() else {
 		return;
 	};
 
-	let pressed = actions.pressed(&PlayerAction::Punch);
-	let just = actions.just_pressed(&PlayerAction::Punch);
+	let pressed = input.punch;
 
 	let fire = |evw: &mut EventWriter<VoxelEditEvent>,
 	            cmds: &mut Commands,
@@ -63,7 +58,7 @@ pub fn punch_attack(
 	let pos = player_xf.translation();
 	let forward = player.facing.normalize_or_zero();
 
-	if just || pressed {
+	if pressed {
 		if ability_cds.ready(&PlayerAbility::Punch).is_ok() {
 			fire(&mut evw_dig, &mut commands, pos, forward, up);
 			let _ = ability_cds.trigger(&PlayerAbility::Punch);

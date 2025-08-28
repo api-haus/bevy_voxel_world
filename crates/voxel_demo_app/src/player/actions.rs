@@ -1,17 +1,17 @@
 use bevy::input::gamepad::GamepadButton;
-
 use bevy::prelude::*;
-
 use leafwing_input_manager::prelude::*;
 
-// no gamepad mapping for movement yet; only WASD
+// movement supports both keyboard (WASD) and gamepad left stick
 
 #[derive(Actionlike, PartialEq, Eq, Hash, Clone, Copy, Debug, Reflect)]
 pub enum PlayerAction {
-	MoveLeft,
-	MoveRight,
-	MoveForward,
-	MoveBack,
+	// Unified 2D movement vector (keyboard WASD and gamepad left stick)
+	#[actionlike(DualAxis)]
+	Move2D,
+	// Optional: look vector (e.g., mouse/gamepad). Not mapped by default.
+	#[actionlike(DualAxis)]
+	Look2D,
 	Jump,
 	Boost,
 	Punch,
@@ -20,11 +20,7 @@ pub enum PlayerAction {
 
 pub fn default_input_map() -> InputMap<PlayerAction> {
 	let mut map = InputMap::default();
-	// WASD movement
-	map.insert(PlayerAction::MoveLeft, KeyCode::KeyA);
-	map.insert(PlayerAction::MoveRight, KeyCode::KeyD);
-	map.insert(PlayerAction::MoveForward, KeyCode::KeyW);
-	map.insert(PlayerAction::MoveBack, KeyCode::KeyS);
+	// No discrete movement buttons; Move2D is read from axis_pair + gamepad axes
 	// Jump / Boost / Punch
 	map.insert(PlayerAction::Jump, KeyCode::Space);
 	map.insert(PlayerAction::Boost, KeyCode::ShiftLeft);

@@ -12,14 +12,12 @@ pub mod punch;
 
 pub mod spawn;
 
+pub mod input;
 pub mod states;
 
-pub use components::Player;
-
 use bevy::prelude::*;
-
+pub use components::Player;
 use leafwing_abilities::prelude::AbilityPlugin;
-
 use leafwing_input_manager::prelude::InputManagerPlugin;
 
 pub struct PlayerPlugin;
@@ -46,6 +44,7 @@ impl Plugin for PlayerPlugin {
 				(PlayerSet::Input, PlayerSet::Movement, PlayerSet::Post).chain(),
 			)
 			.add_systems(Startup, spawn::setup_player)
+			.add_systems(Update, input::update_player_input.in_set(PlayerSet::Input))
 			.add_systems(
 				FixedUpdate,
 				(
