@@ -21,6 +21,9 @@ default = []
 # Opt-in: enable WebAssembly threads (requires COOP/COEP and atomics)
 wasm_threads = []
 
+# Opt-in: increase log verbosity for troubleshooting
+verbose_logs = []
+
 
 [dependencies]
 bevy = { workspace = true }
@@ -51,4 +54,4 @@ bevy = { workspace = true }
 getrandom = { version = "0.3.3", features = ["wasm_js"] }
 wasm-bindgen = "0.2.100"
 wasm-bindgen-futures = "0.4.50"
-wasm-bindgen-rayon = "1.3.0"
+wasm-bindgen-rayon = { version = "1.3.0", features = ["no-bundler"] }

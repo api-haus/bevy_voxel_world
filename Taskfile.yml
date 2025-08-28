@@ -101,7 +101,14 @@ tasks:
       - cargo build -Z build-std=std,panic_abort --target wasm32-unknown-unknown
 
   web:run:
-    desc: Run voxel_demo_app for WebAssembly with auto-open browser
+    desc: Run voxel_demo_app for WebAssembly (multithread default) with auto-open browser
+    dir: /Volumes/Archive2TB/_dev/bevister/crates/voxel_demo_app
+    cmds:
+      - command -v wasm-server-runner || cargo install wasm-server-runner --locked
+      - cargo run -Z build-std=std,panic_abort --target wasm32-unknown-unknown -- --open
+
+  web:run:st:
+    desc: Run voxel_demo_app for WebAssembly single-thread fallback (sync mesh)
     dir: /Volumes/Archive2TB/_dev/bevister/crates/voxel_demo_app
     cmds:
       - command -v wasm-server-runner || cargo install wasm-server-runner --locked
