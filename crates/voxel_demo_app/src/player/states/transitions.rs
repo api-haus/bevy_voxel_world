@@ -5,7 +5,11 @@ use crate::player::states::{PlayerMoveState, PlayerTransitionIntent};
 pub fn from_locomotion(
 	mut ev: EventWriter<PlayerTransitionIntent>,
 	q_player: Query<
-		&crate::player::states::climb::ClimbContact,
+		(
+			Option<&crate::player::states::climb::ClimbContact>,
+			&crate::player::components::Player,
+			Option<&crate::player::states::climb::ClimbSuppress>,
+		),
 		With<crate::player::components::Player>,
 	>,
 	q_actions: Query<
@@ -36,43 +40,83 @@ pub fn from_locomotion(
 		return;
 	}
 
-	// Climb detection
-	if q_player.single().is_ok() {
-		tracing::info!("transition intent: Locomotion -> Climb (climb_contact present)");
-		ev.write(PlayerTransitionIntent {
-			to: PlayerMoveState::Climb,
-			priority: 100,
-			reason: "climb_contact",
-		});
+	// Climb detection: contact exists AND pushing roughly into the surface, and no
+	// suppression active
+	if let Ok((maybe_contact, player, maybe_suppress)) = q_player.single() {
+		let suppressed = maybe_suppress.map(|s| s.0 > 0.0).unwrap_or(false);
+		if suppressed {
+			return;
+		}
+		if let Some(contact) = maybe_contact {
+			let facing = player.facing.normalize_or_zero();
+			let toward_surface = contact.normal.dot(facing) < -0.2;
+			if toward_surface {
+				tracing::info!("transition intent: Locomotion -> Climb (steep surface, pushing in)");
+				ev.write(PlayerTransitionIntent {
+					to: PlayerMoveState::Climb,
+					priority: 100,
+					reason: "climb_contact_pushing",
+				});
+			}
+		}
 	}
 }
 
 pub fn from_or_within_climb(
+	mut commands: Commands,
 	mut ev: EventWriter<PlayerTransitionIntent>,
 	state: Res<State<PlayerMoveState>>,
-	q: Query<
-		Option<&crate::player::states::climb::ClimbContact>,
+	time: Res<Time>,
+	q_actions: Query<
+		&leafwing_input_manager::prelude::ActionState<crate::player::actions::PlayerAction>,
+		With<crate::player::components::Player>,
+	>,
+	q_player: Query<
+		(
+			Entity,
+			&GlobalTransform,
+			&crate::player::components::PlayerDimensions,
+		),
+		With<crate::player::components::Player>,
+	>,
+	mut q_suppress: Query<
+		&mut crate::player::states::climb::ClimbSuppress,
 		With<crate::player::components::Player>,
 	>,
 ) {
 	let in_climb = state.get() == &PlayerMoveState::Climb;
-	let has_contact = q.single().ok().flatten().is_some();
+	let Ok((ent, _xf, _dims)) = q_player.single() else {
+		return;
+	};
 
-	if !in_climb && has_contact {
-		tracing::info!("transition intent: Locomotion -> Climb (contact)");
-		ev.write(PlayerTransitionIntent {
-			to: PlayerMoveState::Climb,
-			priority: 100,
-			reason: "climb_enter",
-		});
-	} else if in_climb && !has_contact {
-		tracing::info!("transition intent: Climb -> Locomotion (lost contact)");
-		ev.write(PlayerTransitionIntent {
-			to: PlayerMoveState::Locomotion,
-			priority: 90,
-			reason: "climb_exit",
-		});
+	// Tick suppression if present
+	if let Ok(mut sup) = q_suppress.get_mut(ent) {
+		sup.0 = (sup.0 - time.delta_secs()).max(0.0);
 	}
+
+	if !in_climb {
+		return;
+	}
+
+	// Exit only by Jump: set suppression timer
+	if let Ok(actions) = q_actions.single() {
+		if actions.just_pressed(&crate::player::actions::PlayerAction::Jump) {
+			commands
+				.entity(ent)
+				.insert(crate::player::states::climb::ClimbSuppress(
+					crate::player::components::ClimbConfig::default().climb_reenter_suppress_secs,
+				));
+			tracing::info!("transition intent: Climb -> Locomotion (jump)");
+			ev.write(PlayerTransitionIntent {
+				to: PlayerMoveState::Locomotion,
+				priority: 200,
+				reason: "climb_jump",
+			});
+			return;
+		}
+	}
+
+	// Otherwise: stay in Climb (sticky); no other exits
 }
 
 pub fn from_debugfly(

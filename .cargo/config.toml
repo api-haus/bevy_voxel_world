@@ -1,19 +1,11 @@
-#[unstable]
-#codegen-backend = true
-
-#[profile.dev]
-#codegen-backend = "cranelift"
-
-#[profile.dev.package."*"]
-#codegen-backend = "llvm"
-#
-#[target.x86_64-unknown-linux-gnu]
-#rustflags = [
-#    # (Nightly) Make the current crate share its generic instantiations
-#    "-Zshare-generics=y",
-#]
-
-# It's recommended to set the flag on a per-target basis:
 [target.wasm32-unknown-unknown]
-rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+rustflags = [
+	'--cfg',
+	'getrandom_backend="wasm_js"',
+	'-C',
+	'target-feature=+atomics,+bulk-memory,+mutable-globals',
+]
 runner = "wasm-server-runner"
+
+[unstable]
+build-std = ["std", "panic_abort"]

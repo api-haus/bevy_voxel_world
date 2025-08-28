@@ -62,6 +62,7 @@ pub fn setup_player(
 		PlayerAbility::abilities_bundle(),
 		PlayerDimensions { height, radius },
 		PlayerConfig::default(),
+		avian::GravityScale(1.0),
 	));
 
 	// Visor child to indicate player forward orientation

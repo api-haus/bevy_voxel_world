@@ -20,10 +20,14 @@
 var albedo_array: texture_2d_array<f32>;
 @group(2) @binding(101)
 var albedo_array_sampler: sampler;
+
+struct TriplanarParams {
+    tiling_scale: f32,
+    albedo_layer_count: u32,
+    _pad: vec2<f32>,
+};
 @group(2) @binding(102)
-var<uniform> triplanar_tiling_scale: f32;
-@group(2) @binding(103)
-var<uniform> albedo_layer_count: u32;
+var<uniform> triplanar: TriplanarParams;
 
 // Small MVP arrays for per-material params
 const TINT_COUNT: u32 = 8u;
@@ -108,14 +112,14 @@ fn fragment(
 
     // MVP params by mat_id
     let tint = TINTS[mat_id % TINT_COUNT];
-    let scale = SCALES[mat_id % SCALE_COUNT] * triplanar_tiling_scale;
+    let scale = SCALES[mat_id % SCALE_COUNT] * triplanar.tiling_scale;
 
     // Triplanar blend using world-space position and normal
     let pos = in.world_position.xyz;
     let n = normalize(pbr_input.world_normal);
-    let layer = i32(mat_id % albedo_layer_count);
+    let layer = i32(mat_id % triplanar.albedo_layer_count);
     let tri = triplanar_sample_linear(albedo_array, albedo_array_sampler, pos, n, scale, layer);
-
+		
 #ifdef DEBUG_MAT_VIS
     let dbg_rgb = hash_to_rgb(mat_id);
     pbr_input.material.base_color = vec4<f32>(dbg_rgb, pbr_input.material.base_color.a);

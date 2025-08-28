@@ -1,25 +1,15 @@
-use avian3d::prelude::*;
-
-use bevy::asset::AssetPlugin;
-
-use bevy::log::{Level, LogPlugin};
-
-use bevy::pbr::{ExtendedMaterial, MaterialPlugin, StandardMaterial};
-
-use bevy::prelude::*;
-
-use bevy::window::WindowMode;
-
-use bevy_prng::WyRand;
-
-use bevy_rand::plugin::EntropyPlugin;
-
-use bevy_tnua::prelude::*;
-
-use bevy_tnua_avian3d::TnuaAvian3dPlugin;
-
 use std::path::{Path, PathBuf};
 
+use avian3d::prelude::*;
+use bevy::asset::AssetPlugin;
+use bevy::log::{Level, LogPlugin};
+use bevy::pbr::{ExtendedMaterial, MaterialPlugin, StandardMaterial};
+use bevy::prelude::*;
+use bevy::window::WindowMode;
+use bevy_prng::WyRand;
+use bevy_rand::plugin::EntropyPlugin;
+use bevy_tnua::prelude::*;
+use bevy_tnua_avian3d::TnuaAvian3dPlugin;
 use bevy_voxel_plugin::plugin::{TriplanarExtension, VoxelPlugin};
 
 mod atmosphere;
@@ -43,8 +33,8 @@ mod ios_mobile;
 ///
 /// # Safety
 /// This function is called from the iOS runtime and must be `extern "C"`.
-/// It performs engine initialization and runs the app; it should only be called once
-/// per process and assumes the process was prepared for a Bevy app run.
+/// It performs engine initialization and runs the app; it should only be called
+/// once per process and assumes the process was prepared for a Bevy app run.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_main() {
 	run();
@@ -82,23 +72,54 @@ pub fn run() {
 				filter: log_filter,
 				..Default::default()
 			})
-			.set(AssetPlugin {
-				file_path: assets_root.display().to_string(),
-				..Default::default()
+			.set({
+				#[cfg(target_arch = "wasm32")]
+				{
+					AssetPlugin {
+						file_path: "assets".to_string(),
+						..Default::default()
+					}
+				}
+				#[cfg(not(target_arch = "wasm32"))]
+				{
+					AssetPlugin {
+						file_path: assets_root.display().to_string(),
+						..Default::default()
+					}
+				}
 			});
 		#[cfg(not(target_os = "ios"))]
 		{
-			p = p.set(WindowPlugin {
-				primary_window: Some(Window {
-					resizable: false,
-					mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
-					recognize_rotation_gesture: true,
-					prefers_home_indicator_hidden: true,
-					prefers_status_bar_hidden: true,
+			#[cfg(target_arch = "wasm32")]
+			{
+				use bevy::window::WindowResolution;
+				p = p.set(WindowPlugin {
+					primary_window: Some(Window {
+						title: "voxel_demo_app".to_string(),
+						mode: WindowMode::Windowed,
+						fit_canvas_to_parent: true,
+						canvas: None,
+						resolution: WindowResolution::new(1280.0, 720.0),
+						resizable: true,
+						..default()
+					}),
 					..default()
-				}),
-				..default()
-			});
+				});
+			}
+			#[cfg(not(target_arch = "wasm32"))]
+			{
+				p = p.set(WindowPlugin {
+					primary_window: Some(Window {
+						resizable: false,
+						mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+						recognize_rotation_gesture: true,
+						prefers_home_indicator_hidden: true,
+						prefers_status_bar_hidden: true,
+						..default()
+					}),
+					..default()
+				});
+			}
 		}
 
 		p

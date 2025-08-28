@@ -17,7 +17,17 @@ use crate::player::states::{PlayerMoveState, PlayerState};
 pub struct ClimbContact {
 	pub point: Vec3,
 	pub normal: Vec3,
+	pub distance: f32,
 }
+
+#[derive(Component, Default)]
+pub struct ClimbSticky {
+	pub enter_accum: f32,
+	pub exit_accum: f32,
+}
+
+#[derive(Component, Default)]
+pub struct ClimbSuppress(pub f32);
 
 pub fn detect_climbable(
 	mut commands: Commands,
@@ -114,6 +124,7 @@ pub fn detect_climbable(
 			contact = Some(ClimbContact {
 				point: chest + move_dir * d,
 				normal: n,
+				distance: d,
 			});
 			debug!(distance = d, normal = ?n, "climb: contact within engage distance");
 		} else {
@@ -127,6 +138,7 @@ pub fn detect_climbable(
 
 	if let Some(c) = contact {
 		commands.entity(ent).insert(c);
+		commands.entity(ent).insert(ClimbSticky::default());
 		#[cfg(feature = "debug_gizmos")]
 		{
 			_gizmos.sphere(c.point, 0.1, Color::srgb(1.0, 0.2, 0.2));
@@ -155,53 +167,239 @@ impl PlayerState for Climb {
 }
 
 impl Climb {
-	pub fn on_enter() {}
+	pub fn on_enter(
+		mut q: Query<
+			(
+				&mut avian::RigidBody,
+				Option<&mut avian::GravityScale>,
+				Option<&mut avian::LinearVelocity>,
+				Option<&mut avian::AngularVelocity>,
+				Entity,
+			),
+			With<Player>,
+		>,
+		mut commands: Commands,
+	) {
+		for (mut body, grav, lin, ang, ent) in q.iter_mut() {
+			*body = avian::RigidBody::Kinematic;
+			if let Some(mut g) = grav {
+				*g = avian::GravityScale(0.0);
+			}
+			if let Some(mut v) = lin {
+				v.0 = Vec3::ZERO;
+			}
+			if let Some(mut w) = ang {
+				w.0 = Vec3::ZERO;
+			}
 
-	pub fn on_exit() {}
+			// Remove TnuaController so its systems do not affect the player while climbing
+			commands
+				.entity(ent)
+				.remove::<bevy_tnua::controller::TnuaController>();
+		}
+	}
+
+	pub fn on_exit(
+		mut q: Query<
+			(
+				&mut avian::RigidBody,
+				Option<&mut avian::GravityScale>,
+				Entity,
+			),
+			With<Player>,
+		>,
+		mut commands: Commands,
+	) {
+		for (mut body, grav, ent) in q.iter_mut() {
+			*body = avian::RigidBody::Dynamic;
+			if let Some(mut g) = grav {
+				*g = avian::GravityScale(1.0);
+			}
+
+			// Restore TnuaController (default) so locomotion resumes
+			commands
+				.entity(ent)
+				.insert(bevy_tnua::controller::TnuaController::default());
+		}
+	}
 
 	#[allow(clippy::type_complexity)]
 	pub fn on_update(
+		time: Res<Time>,
 		mut q: Query<
 			(
-				&mut avian3d::prelude::LinearVelocity,
+				&mut Transform,
 				&GlobalTransform,
 				&ActionState<PlayerAction>,
+				&mut Player,
 				Option<&ClimbContact>,
 			),
 			With<crate::player::components::Player>,
 		>,
 		cfg: Res<crate::player::components::ClimbConfig>,
 	) {
-		let Ok((mut lv, xf, actions, contact)) = q.single_mut() else {
+		let Ok((mut t, xf, actions, mut player, contact)) = q.single_mut() else {
 			return;
 		};
-		let normal = contact.map(|c| c.normal).unwrap_or(Vec3::Z);
-		let right = Vec3::Y.cross(normal).normalize_or_zero();
+
+		let Some(contact) = contact else {
+			return;
+		};
+		let normal = contact.normal.normalize_or_zero();
+
+		// Build climb plane basis
+		let mut up_tangent = (Vec3::Y - normal * normal.dot(Vec3::Y)).normalize_or_zero();
+		if up_tangent.length_squared() < 1e-4 {
+			// Fallback if normal is nearly vertical
+			up_tangent = (Vec3::X - normal * normal.dot(Vec3::X)).normalize_or_zero();
+		}
+		let right_tangent = up_tangent.cross(normal).normalize_or_zero();
+
+		// Read input and map onto plane tangents
 		let x = (actions.pressed(&PlayerAction::MoveRight) as i32
 			- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
 		let y = (actions.pressed(&PlayerAction::MoveForward) as i32
 			- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
-		let lateral = right * x * cfg.lateral_speed;
+
+		let lateral = right_tangent * x * cfg.lateral_speed;
 		let vertical_speed = if y >= 0.0 {
 			cfg.up_speed
 		} else {
 			cfg.down_speed
 		};
-		let vertical = Vec3::Y * y.abs() * vertical_speed;
-		let stick = -normal * cfg.stick_inward_speed;
-		let desired = lateral + vertical + stick;
-		lv.0 = desired;
+		let vertical = up_tangent * y.abs() * vertical_speed;
+
+		// Adhesion PD toward target wall distance (derivative term omitted for kinematic simplicity)
+		let distance_error = contact.distance - cfg.target_distance; // positive => too far, move inward
+		let adhesion_speed =
+			(cfg.adhesion_kp * distance_error).clamp(-cfg.max_inward_speed, cfg.max_inward_speed);
+		let adhesion = -normal * adhesion_speed;
+
+		// Desired plane motion; ensure no normal component in the tangential wish
+		let mut wish = lateral + vertical;
+		wish -= normal * wish.dot(normal);
+		let desired = wish + adhesion;
+
+		let dt = time.delta_secs();
+		if desired != Vec3::ZERO {
+			t.translation += desired * dt;
+		}
+
+		// Update visual facing toward the surface (into the wall)
+		let target_dir = (-normal).normalize_or_zero();
+		if target_dir != Vec3::ZERO {
+			let current = player.facing.normalize_or_zero();
+			let target = target_dir;
+			let smooth = 0.2;
+			let dot = current.dot(target).clamp(-1.0, 1.0);
+			let angle = dot.acos();
+			if angle > 1e-4 {
+				let axis = current.cross(target).normalize_or_zero();
+				let step = angle * smooth;
+				let rot = Quat::from_axis_angle(axis, step);
+				let new_dir = (rot * current).normalize_or_zero();
+				if new_dir != Vec3::ZERO {
+					player.facing = new_dir;
+				}
+			} else {
+				player.facing = target;
+			}
+		}
+
 		debug!(
-				x,
-				y,
-				right = ?right,
-				normal = ?normal,
-				lateral = ?lateral,
-				vertical = ?vertical,
-				stick = ?stick,
-				desired = ?desired,
-				pos = ?xf.translation(),
-				"climb: control vectors"
+			x,
+			y,
+			right = ?right_tangent,
+			normal = ?normal,
+			lateral = ?lateral,
+			vertical = ?vertical,
+			adhesion = ?adhesion,
+			desired = ?desired,
+			pos = ?xf.translation(),
+			"climb: kinematic control"
+		);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use bevy::ecs::system::IntoSystem;
+	use leafwing_input_manager::prelude::ActionState;
+	use std::time::Duration;
+
+	#[test]
+	fn climb_forward_moves_up_on_vertical_wall() {
+		let cfg = ClimbConfig::default();
+		let normal = Vec3::Z; // vertical wall facing the player
+
+		let mut actions = ActionState::<PlayerAction>::default();
+		actions.press(&PlayerAction::MoveForward);
+
+		let x = (actions.pressed(&PlayerAction::MoveRight) as i32
+			- actions.pressed(&PlayerAction::MoveLeft) as i32) as f32;
+		let y = (actions.pressed(&PlayerAction::MoveForward) as i32
+			- actions.pressed(&PlayerAction::MoveBack) as i32) as f32;
+
+		let mut up_tangent = (Vec3::Y - normal * normal.dot(Vec3::Y)).normalize_or_zero();
+		if up_tangent.length_squared() < 1e-4 {
+			up_tangent = (Vec3::X - normal * normal.dot(Vec3::X)).normalize_or_zero();
+		}
+		let right_tangent = up_tangent.cross(normal).normalize_or_zero();
+
+		let lateral = right_tangent * x * cfg.lateral_speed;
+		let vertical_speed = if y >= 0.0 {
+			cfg.up_speed
+		} else {
+			cfg.down_speed
+		};
+		let vertical = up_tangent * y.abs() * vertical_speed;
+
+		let mut wish = lateral + vertical;
+		wish -= normal * wish.dot(normal);
+
+		assert!(
+			wish.y > 0.0,
+			"Forward input should produce upward wish on vertical wall; wish={:?}",
+			wish
+		);
+	}
+
+	#[test]
+	fn climb_integration_moves_up() {
+		let mut world = World::new();
+		world.insert_resource(ClimbConfig::default());
+
+		let mut time: bevy::prelude::Time<()> = bevy::time::Time::default();
+		time.advance_by(Duration::from_secs_f32(0.1));
+		world.insert_resource(time);
+
+		let mut actions = ActionState::<PlayerAction>::default();
+		actions.press(&PlayerAction::MoveForward);
+
+		let entity = world
+			.spawn((
+				Transform::from_translation(Vec3::ZERO),
+				GlobalTransform::default(),
+				actions,
+				Player::default(),
+				ClimbContact {
+					point: Vec3::ZERO,
+					normal: Vec3::Z,
+					distance: 0.35,
+				},
+			))
+			.id();
+
+		let mut sys = IntoSystem::into_system(Climb::on_update);
+		sys.initialize(&mut world);
+		sys.run((), &mut world);
+
+		let t = world.get::<Transform>(entity).unwrap();
+		assert!(
+			t.translation.y > 0.0,
+			"Expected to climb up; got y={}",
+			t.translation.y
 		);
 	}
 }

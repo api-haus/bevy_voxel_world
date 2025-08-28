@@ -44,6 +44,15 @@ pub struct ClimbConfig {
 	pub down_speed: f32,
 	pub lateral_speed: f32,
 	pub stick_inward_speed: f32,
+	pub target_distance: f32,
+	pub adhesion_kp: f32,
+	pub adhesion_kd: f32,
+	pub max_inward_speed: f32,
+	// Hysteresis
+	pub enter_dwell_secs: f32,
+	pub exit_grace_secs: f32,
+	// Climb re-entry suppression after jump exit
+	pub climb_reenter_suppress_secs: f32,
 }
 
 impl Default for ClimbConfig {
@@ -55,6 +64,13 @@ impl Default for ClimbConfig {
 			down_speed: 3.0,
 			lateral_speed: 2.0,
 			stick_inward_speed: 1.0,
+			target_distance: 0.35,
+			adhesion_kp: 8.0,
+			adhesion_kd: 2.5,
+			max_inward_speed: 3.0,
+			enter_dwell_secs: 0.06,
+			exit_grace_secs: 0.2,
+			climb_reenter_suppress_secs: 0.3,
 		}
 	}
 }

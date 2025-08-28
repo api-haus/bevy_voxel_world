@@ -1,13 +1,9 @@
 use avian3d::prelude as avian;
-
 use bevy::prelude::*;
-
 use leafwing_input_manager::prelude::ActionState;
 
 use crate::player::actions::PlayerAction;
-
 use crate::player::components::Player;
-
 use crate::player::states::{PlayerMoveState, PlayerState};
 
 pub struct DebugFly;
@@ -18,13 +14,26 @@ impl PlayerState for DebugFly {
 
 impl DebugFly {
 	pub fn on_enter(
-		mut q: Query<(&mut avian::RigidBody, Option<&mut avian::GravityScale>), With<Player>>,
+		mut q: Query<
+			(
+				&mut avian::RigidBody,
+				Option<&mut avian::GravityScale>,
+				Option<&mut avian::LinearVelocity>,
+				Option<&mut avian::AngularVelocity>,
+			),
+			With<Player>,
+		>,
 	) {
-		for (mut body, grav) in q.iter_mut() {
+		for (mut body, grav, lin, ang) in q.iter_mut() {
 			*body = avian::RigidBody::Kinematic;
-
 			if let Some(mut g) = grav {
 				*g = avian::GravityScale(0.0);
+			}
+			if let Some(mut v) = lin {
+				v.0 = Vec3::ZERO;
+			}
+			if let Some(mut w) = ang {
+				w.0 = Vec3::ZERO;
 			}
 		}
 	}
@@ -34,7 +43,6 @@ impl DebugFly {
 	) {
 		for (mut body, grav) in q.iter_mut() {
 			*body = avian::RigidBody::Dynamic;
-
 			if let Some(mut g) = grav {
 				*g = avian::GravityScale(1.0);
 			}

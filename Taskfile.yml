@@ -93,3 +93,16 @@ tasks:
     dir: /Volumes/Archive2TB/_dev/bevister
     cmds:
       - cargo run -p voxel_demo_app --release --features diagnostics_ui
+
+  web:build:
+    desc: Build voxel_demo_app for WebAssembly (wasm32) with threads
+    dir: /Volumes/Archive2TB/_dev/bevister/crates/voxel_demo_app
+    cmds:
+      - cargo build -Z build-std=std,panic_abort --target wasm32-unknown-unknown
+
+  web:run:
+    desc: Run voxel_demo_app for WebAssembly with auto-open browser
+    dir: /Volumes/Archive2TB/_dev/bevister/crates/voxel_demo_app
+    cmds:
+      - command -v wasm-server-runner || cargo install wasm-server-runner --locked
+      - cargo run -Z build-std=std,panic_abort --target wasm32-unknown-unknown --features bevy_voxel_plugin/wasm_sync_mesh -- --open

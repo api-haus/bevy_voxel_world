@@ -1,15 +1,11 @@
 use bevy::pbr::{
 	ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
 };
-
 use bevy::prelude::*;
-
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
-
 use bevy::render::render_resource::{
-	AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
+	AsBindGroup, RenderPipelineDescriptor, ShaderRef, ShaderType, SpecializedMeshPipelineError,
 };
-
 use tracing::{debug, info};
 
 #[derive(Resource)]
@@ -23,6 +19,13 @@ pub(crate) struct VoxelRenderMaterial {
 	pub(crate) handle: Handle<ExtendedMaterial<StandardMaterial, TriplanarExtension>>,
 }
 
+#[derive(ShaderType, Reflect, Debug, Clone, Copy)]
+pub struct TriplanarParams {
+	pub tiling_scale: f32,
+	pub albedo_layer_count: u32,
+	pub _pad: Vec2,
+}
+
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 #[bind_group_data(TriplanarExtensionKey)]
 pub struct TriplanarExtension {
@@ -30,9 +33,7 @@ pub struct TriplanarExtension {
 	#[sampler(101)]
 	pub(crate) albedo_array: Handle<Image>,
 	#[uniform(102)]
-	pub(crate) tiling_scale: f32,
-	#[uniform(103)]
-	pub(crate) albedo_layer_count: u32,
+	pub(crate) triplanar: TriplanarParams,
 	pub(crate) debug_mat_vis: bool,
 }
 
@@ -53,8 +54,11 @@ impl Default for TriplanarExtension {
 	fn default() -> Self {
 		Self {
 			albedo_array: Default::default(),
-			tiling_scale: 0.5,
-			albedo_layer_count: 1,
+			triplanar: TriplanarParams {
+				tiling_scale: 0.5,
+				albedo_layer_count: 1,
+				_pad: Vec2::ZERO,
+			},
 			debug_mat_vis: false,
 		}
 	}
@@ -94,7 +98,8 @@ pub(crate) fn init_voxel_material_when_ready(
 	maybe_existing: Option<Res<VoxelRenderMaterial>>,
 ) {
 	if maybe_existing.is_some() {
-		// info!(target: "vox", "init_voxel_material_when_ready: material already exists");
+		// info!(target: "vox", "init_voxel_material_when_ready: material already
+		// exists");
 		return;
 	}
 
@@ -129,6 +134,11 @@ pub(crate) fn init_voxel_material_when_ready(
 		},
 		extension: TriplanarExtension {
 			albedo_array: loading_texture.handle.clone(),
+			triplanar: TriplanarParams {
+				tiling_scale: 0.5,
+				albedo_layer_count: layers as u32,
+				_pad: Vec2::ZERO,
+			},
 			..Default::default()
 		},
 	});

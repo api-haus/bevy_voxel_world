@@ -1,21 +1,15 @@
-use bevy::prelude::*;
-
-use fast_surface_nets::SurfaceNetsBuffer;
-
 use std::collections::HashMap;
-
 use std::collections::VecDeque;
-
 use std::sync::mpsc::{Receiver, Sender};
-
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use std::time::{Duration, Instant};
-
+use bevy::prelude::*;
+use fast_surface_nets::SurfaceNetsBuffer;
 use tracing::{debug, info_span, trace};
+use web_time::Instant;
 
 use crate::voxel_plugin::meshing::surface_nets::select_vertex_materials_from_positions_arrays;
-
 use crate::voxel_plugin::voxels::storage::VoxelStorage;
 
 // Budget for remeshing work per frame
@@ -101,6 +95,55 @@ pub(crate) fn drain_queue_and_spawn_jobs(
 		telemetry.jobs_spawned_frame = telemetry.jobs_spawned_frame.saturating_add(1);
 		timings.start_times.insert(entity, Instant::now());
 
+		#[cfg(feature = "wasm_sync_mesh")]
+		{
+			let fsn_span = info_span!("fsn_run_sync", entity = ?entity, sample_dims = ?s);
+			let _fsn_enter = fsn_span.enter();
+			let fsn_start = Instant::now();
+
+			let mut any_pos = false;
+			let mut any_neg = false;
+			for &v in &sdf {
+				if v <= 0.0 {
+					any_neg = true;
+				} else {
+					any_pos = true;
+				}
+				if any_pos && any_neg {
+					break;
+				}
+			}
+			if !(any_pos && any_neg) {
+				let _ = tx.send(super::RemeshReady {
+					entity,
+					buffer: SurfaceNetsBuffer::default(),
+					vertex_colors: None,
+				});
+			} else {
+				let mut buffer = SurfaceNetsBuffer::default();
+				fast_surface_nets::surface_nets(
+					&sdf,
+					&fast_surface_nets::ndshape::ConstShape3u32::<18, 18, 18>,
+					[0; 3],
+					[17, 17, 17],
+					&mut buffer,
+				);
+				let vmat = select_vertex_materials_from_positions_arrays(s, &sdf, &mat, &buffer.positions);
+				let vertex_colors: Vec<[f32; 4]> = vmat
+					.iter()
+					.map(|&m| [(m as f32) / 255.0, 0.0, 0.0, 1.0])
+					.collect();
+				let _ = tx.send(super::RemeshReady {
+					entity,
+					buffer,
+					vertex_colors: Some(vertex_colors),
+				});
+			}
+			let _dur_ms = fsn_start.elapsed().as_secs_f32() * 1000.0;
+			continue;
+		}
+
+		#[cfg(not(feature = "wasm_sync_mesh"))]
 		rayon::spawn(move || {
 			let fsn_span = info_span!("fsn_run", entity = ?entity, sample_dims = ?s);
 			let _fsn_enter = fsn_span.enter();
@@ -182,7 +225,8 @@ pub(crate) fn pump_remesh_results(
 	mut timings: ResMut<RemeshInFlightTimings>,
 	maybe_render_mat: Option<Res<super::VoxelRenderMaterial>>,
 ) {
-	// Defer draining until voxel material is ready to avoid dropping results before meshes can be applied
+	// Defer draining until voxel material is ready to avoid dropping results before
+	// meshes can be applied
 	if maybe_render_mat.is_none() {
 		trace!(target: "vox", "pump_remesh_results: material not ready; deferring pump");
 		return;

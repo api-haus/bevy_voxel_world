@@ -3,6 +3,11 @@ name = "bevy_voxel_plugin"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# When enabled (typically on wasm without threads), run meshing synchronously on the main thread
+wasm_sync_mesh = []
+
 [dependencies]
 bevy = { workspace = true }
 avian3d = { workspace = true }
@@ -15,3 +20,7 @@ rand = { workspace = true }
 tracing = { workspace = true }
 iyes_perf_ui = { workspace = true }
 thiserror = "1.0"
+web-time = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3.3", features = ["wasm_js"] }
