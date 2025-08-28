@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_voxel_plugin::plugin::{EditOp, VoxelEditEvent};
 use leafwing_abilities::prelude::*;
-use leafwing_input_manager::prelude::*;
 
 use super::visualize::PunchGizmo;
 use crate::player::abilities::PlayerAbility;

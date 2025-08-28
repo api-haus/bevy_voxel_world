@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_tnua::prelude::*;
 
-use crate::player::actions::PlayerAction;
 use crate::player::components::{Player, PlayerConfig};
 use crate::player::input::PlayerInput;
 use crate::player::states::{PlayerMoveState, PlayerState};

@@ -1,5 +1,5 @@
 use avian3d::prelude as avian;
-use bevy::input::gamepad::{Gamepad, GamepadAxis};
+use bevy::input::gamepad::Gamepad;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use tracing::debug;
@@ -18,6 +18,7 @@ pub struct ClimbContact {
 }
 
 #[derive(Component, Default)]
+#[allow(dead_code)]
 pub struct ClimbSticky {
 	pub enter_accum: f32,
 	pub exit_accum: f32,
@@ -234,10 +235,10 @@ impl Climb {
 			),
 			With<crate::player::components::Player>,
 		>,
-		q_gamepads: Query<&Gamepad>,
+		_q_gamepads: Query<&Gamepad>,
 		cfg: Res<crate::player::components::ClimbConfig>,
 	) {
-		let Ok((mut t, xf, actions, mut player, input, contact)) = q.single_mut() else {
+		let Ok((mut t, xf, _actions, mut player, input, contact)) = q.single_mut() else {
 			return;
 		};
 

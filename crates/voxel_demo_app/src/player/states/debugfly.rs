@@ -1,7 +1,6 @@
 use avian3d::prelude as avian;
 use bevy::prelude::*;
 
-use crate::player::actions::PlayerAction;
 use crate::player::components::Player;
 use crate::player::input::PlayerInput;
 use crate::player::states::{PlayerMoveState, PlayerState};

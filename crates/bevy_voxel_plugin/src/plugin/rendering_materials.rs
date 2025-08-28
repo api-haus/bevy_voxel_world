@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use bevy::pbr::{
 	ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
 };
@@ -20,6 +21,7 @@ pub(crate) struct VoxelRenderMaterial {
 }
 
 #[derive(ShaderType, Reflect, Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct TriplanarParams {
 	pub tiling_scale: f32,
 	pub albedo_layer_count: u32,

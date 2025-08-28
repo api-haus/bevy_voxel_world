@@ -43,13 +43,17 @@ pub struct ClimbConfig {
 	pub up_speed: f32,
 	pub down_speed: f32,
 	pub lateral_speed: f32,
+	#[allow(dead_code)]
 	pub stick_inward_speed: f32,
 	pub target_distance: f32,
 	pub adhesion_kp: f32,
+	#[allow(dead_code)]
 	pub adhesion_kd: f32,
 	pub max_inward_speed: f32,
 	// Hysteresis
+	#[allow(dead_code)]
 	pub enter_dwell_secs: f32,
+	#[allow(dead_code)]
 	pub exit_grace_secs: f32,
 	// Climb re-entry suppression after jump exit
 	pub climb_reenter_suppress_secs: f32,
@@ -74,5 +78,3 @@ impl Default for ClimbConfig {
 		}
 	}
 }
-
-// Removed: punch cooldown is handled by `leafwing_abilities` CooldownState
