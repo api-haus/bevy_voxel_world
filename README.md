@@ -19,6 +19,7 @@ The repository emphasizes feature-scoped Bevy plugins and a domain-first design 
   - `assets/`: Textures, shaders, and other runtime assets
 
 - **`docs/`**: Design notes, specifications, and diagrams
+   - Architecture: see `docs/voxel_plugin_architecture.md` for a language-agnostic ECS spec of the voxel plugin
 - **`scripts/`**: Development helpers (e.g., formatting/spacing tooling)
 
 - **`ios-src/`**: Shell scripts to build and run on iOS devices/simulators
