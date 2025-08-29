@@ -1,5 +1,5 @@
 ---
-globs: crates/**,Cargo.toml,crates/**/Cargo.toml
+# globs: crates/**,Cargo.toml,crates/**/Cargo.toml
 alwaysApply: true
 ---
 

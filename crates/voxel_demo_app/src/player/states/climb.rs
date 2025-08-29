@@ -1,6 +1,10 @@
 use avian3d::prelude as avian;
-use bevy::input::gamepad::Gamepad;
 use bevy::prelude::*;
+use bevy_tnua::builtins::TnuaBuiltinClimb;
+use bevy_tnua::math::AsF32;
+use bevy_tnua::prelude::*;
+use bevy_tnua::radar_lens::TnuaRadarLens;
+use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 use leafwing_input_manager::prelude::*;
 use tracing::debug;
 
@@ -31,26 +35,28 @@ pub fn detect_climbable(
 			&Player,
 			&PlayerConfig,
 			&PlayerDimensions,
+			&PlayerInput,
 		),
 		With<Player>,
 	>,
+	q_cam: Query<&GlobalTransform, (With<Camera3d>, Without<Player>)>,
 	mut spatial_query: avian::SpatialQuery,
 	config: Res<ClimbConfig>,
 	mut _gizmos: Gizmos,
 ) {
-	let Ok((ent, xf, player, pconf, dims)) = q_player.single() else {
+	let Ok((ent, xf, _player, pconf, _dims, _input)) = q_player.single() else {
 		debug!("climb: no valid player");
 		return;
 	};
+
+	// Ray direction: camera forward in world space
+	let cam_forward = if let Some(cam_xf) = q_cam.iter().next() {
+		(-cam_xf.compute_transform().forward()).normalize_or_zero()
+	} else {
+		Vec3::Z
+	};
+
 	let origin = xf.translation();
-	let mut move_dir = player.facing.normalize_or_zero();
-
-	if move_dir == Vec3::ZERO {
-		move_dir = Vec3::Z;
-	}
-
-	let chest = origin + Vec3::Y * 0.8;
-	let samples = [chest];
 	let max_dist = config.detect_distance;
 
 	spatial_query.update_pipeline();
@@ -59,74 +65,52 @@ pub fn detect_climbable(
 	let filter = avian::SpatialQueryFilter::default().with_excluded_entities([ent]);
 
 	let mut contact: Option<ClimbContact> = None;
-	let mut best: Option<(Vec3, f32)> = None;
 
-	for s in samples.into_iter() {
-		let origin = s + move_dir * (dims.radius + 0.05);
+	if let Some(hit) = spatial_query.cast_ray(
+		origin,
+		Dir3::new_unchecked(cam_forward),
+		max_dist,
+		true,
+		&filter,
+	) {
+		let hit_dist = hit.distance.min(max_dist);
+		let n = hit.normal.normalize_or_zero();
+		let surface_slope_from_horizontal = (n.dot(Vec3::Y).abs()).clamp(0.0, 1.0).acos();
+		let is_steeper_than_walkable = surface_slope_from_horizontal > pconf.walk_max_slope_rad;
+		let facing_dot = n.dot(cam_forward);
+		let min_self_distance = 0.05;
 
-		if let Some(hit) = spatial_query.cast_ray(
-			origin,
-			Dir3::new_unchecked(move_dir),
-			max_dist,
-			true,
-			&filter,
-		) {
-			let hit_dist = hit.distance.min(max_dist);
-			let n = hit.normal.normalize_or_zero();
-			let surface_slope_from_horizontal = (n.dot(Vec3::Y).abs()).clamp(0.0, 1.0).acos();
-			let is_steeper_than_walkable = surface_slope_from_horizontal > pconf.walk_max_slope_rad;
-			let facing_dot = n.dot(move_dir);
-			let min_self_distance = 0.1;
-
-			if is_steeper_than_walkable
-				&& facing_dot < -0.2
-				&& hit_dist > min_self_distance
-				&& best.map(|(_, d)| hit_dist < d).unwrap_or(true)
-			{
-				best = Some((n, hit_dist));
-			}
-
-			debug!(
-				hit_distance = hit_dist,
-				facing_dot,
-				slope = surface_slope_from_horizontal,
-				is_steeper_than_walkable,
-				"climb: ray hit"
-			);
-			#[cfg(feature = "debug_gizmos")]
-			{
-				let start = origin;
-				let end = start + move_dir * hit_dist;
-				let col = if is_steeper_than_walkable && facing_dot < -0.2 {
-					Color::srgb(0.2, 1.0, 0.2)
-				} else {
-					Color::srgb(0.8, 0.2, 0.2)
-				};
-				_gizmos.sphere(s, 0.06, Color::srgb(0.9, 0.9, 0.9));
-				_gizmos.sphere(start, 0.05, Color::srgb(0.6, 0.6, 0.6));
-				_gizmos.arrow(start, end, col);
-				_gizmos.arrow(end, end + n * 0.4, Color::srgb(0.9, 0.9, 0.2));
-			}
-		} else {
-			debug!("climb: no hit");
-		}
-	}
-
-	if let Some((n, d)) = best {
-		if d <= config.engage_distance {
+		if is_steeper_than_walkable && facing_dot < -0.2 && hit_dist > min_self_distance {
+			let point = origin + cam_forward * hit_dist;
 			contact = Some(ClimbContact {
-				point: chest + move_dir * d,
+				point,
 				normal: n,
-				distance: d,
+				distance: hit_dist,
 			});
-			debug!(distance = d, normal = ?n, "climb: contact within engage distance");
-		} else {
-			commands.entity(ent).remove::<ClimbContact>();
-			debug!(
-				distance = d,
-				"climb: contact too far; removing ClimbContact"
-			);
 		}
+
+		debug!(
+			hit_distance = hit_dist,
+			facing_dot,
+			slope = surface_slope_from_horizontal,
+			is_steeper_than_walkable,
+			"climb: ray hit"
+		);
+		#[cfg(feature = "debug_gizmos")]
+		{
+			let start = origin;
+			let end = start + cam_forward * hit_dist;
+			let col = if is_steeper_than_walkable && facing_dot < -0.2 {
+				Color::srgb(0.2, 1.0, 0.2)
+			} else {
+				Color::srgb(0.8, 0.2, 0.2)
+			};
+			_gizmos.sphere(start, 0.05, Color::srgb(0.6, 0.6, 0.6));
+			_gizmos.arrow(start, end, col);
+			_gizmos.arrow(end, end + n * 0.4, Color::srgb(0.9, 0.9, 0.2));
+		}
+	} else {
+		debug!("climb: no hit");
 	}
 
 	if let Some(c) = contact {
@@ -160,157 +144,107 @@ impl PlayerState for Climb {
 }
 
 impl Climb {
-	pub fn on_enter(
-		mut q: Query<
-			(
-				&mut avian::RigidBody,
-				Option<&mut avian::GravityScale>,
-				Option<&mut avian::LinearVelocity>,
-				Option<&mut avian::AngularVelocity>,
-				Entity,
-			),
-			With<Player>,
-		>,
-		mut commands: Commands,
-	) {
-		for (mut body, grav, lin, ang, ent) in q.iter_mut() {
-			*body = avian::RigidBody::Kinematic;
-			if let Some(mut g) = grav {
-				*g = avian::GravityScale(0.0);
-			}
-			if let Some(mut v) = lin {
-				v.0 = Vec3::ZERO;
-			}
-			if let Some(mut w) = ang {
-				w.0 = Vec3::ZERO;
-			}
+	pub fn on_enter() {}
 
-			// Remove TnuaController so its systems do not affect the player while climbing
-			commands
-				.entity(ent)
-				.remove::<bevy_tnua::controller::TnuaController>();
-		}
-	}
-
-	pub fn on_exit(
-		mut q: Query<
-			(
-				&mut avian::RigidBody,
-				Option<&mut avian::GravityScale>,
-				Entity,
-			),
-			With<Player>,
-		>,
-		mut commands: Commands,
-	) {
-		for (mut body, grav, ent) in q.iter_mut() {
-			*body = avian::RigidBody::Dynamic;
-			if let Some(mut g) = grav {
-				*g = avian::GravityScale(1.0);
-			}
-
-			// Restore TnuaController (default) so locomotion resumes
-			commands
-				.entity(ent)
-				.insert(bevy_tnua::controller::TnuaController::default());
-		}
-	}
+	pub fn on_exit() {}
 
 	#[allow(clippy::type_complexity)]
 	pub fn on_update(
-		time: Res<Time>,
+		_time: Res<Time>,
 		mut q: Query<
 			(
-				&mut Transform,
+				&mut TnuaController,
 				&GlobalTransform,
 				&ActionState<PlayerAction>,
 				&mut Player,
 				&PlayerInput,
-				Option<&ClimbContact>,
+				&bevy_tnua::TnuaObstacleRadar,
 			),
 			With<crate::player::components::Player>,
 		>,
-		_q_gamepads: Query<&Gamepad>,
+		spatial_ext: TnuaSpatialExtAvian3d,
+		q_cam: Query<&GlobalTransform, (With<Camera3d>, Without<crate::player::components::Player>)>,
 		cfg: Res<crate::player::components::ClimbConfig>,
+		mut _gizmos: Gizmos,
 	) {
-		let Ok((mut t, xf, _actions, mut player, input, contact)) = q.single_mut() else {
+		let Ok((mut ctrl, _xf, _actions, mut player, input, radar)) = q.single_mut() else {
 			return;
 		};
 
-		let Some(contact) = contact else {
-			return;
-		};
-		// Ensure all fields are considered used regardless of debug feature gates
-		let _ = contact.point;
-		let normal = contact.normal.normalize_or_zero();
+		let radar_lens = TnuaRadarLens::new(radar, &spatial_ext);
 
-		// Build climb plane basis
-		let mut up_tangent = (Vec3::Y - normal * normal.dot(Vec3::Y)).normalize_or_zero();
-		if up_tangent.length_squared() < 1e-4 {
-			// Fallback if normal is nearly vertical
-			up_tangent = (Vec3::X - normal * normal.dot(Vec3::X)).normalize_or_zero();
+		let mut picked = None;
+		let mut best_dist = f32::MAX;
+		for blip in radar_lens.iter_blips() {
+			let cam_forward = if let Some(cam_xf) = q_cam.iter().next() {
+				(-cam_xf.compute_transform().forward()).normalize_or_zero()
+			} else {
+				Vec3::Z
+			};
+			let n = blip.normal_from_closest_point().f32().normalize_or_zero();
+			let slope_from_horizontal = (n.dot(Vec3::Y).abs()).clamp(0.0, 1.0).acos();
+			let near_vertical = slope_from_horizontal > std::f32::consts::FRAC_PI_4;
+			let facing_cam = n.dot(cam_forward) < -0.2;
+			let d = blip
+				.closest_point()
+				.get()
+				.distance(radar.tracked_position().f32());
+			if near_vertical && facing_cam && d < best_dist {
+				best_dist = d;
+				picked = Some(blip);
+			}
 		}
-		let right_tangent = up_tangent.cross(normal).normalize_or_zero();
 
-		// Read input and map onto plane tangents: prefer PlayerInput snapshot
+		let Some(blip) = picked else {
+			return;
+		};
+
+		// Camera forward, wall normal and plane axes
+		let cam_forward = if let Some(cam_xf) = q_cam.iter().next() {
+			(-cam_xf.compute_transform().forward()).normalize_or_zero()
+		} else {
+			Vec3::Z
+		};
+		let n = blip.normal_from_closest_point().f32();
+		let mut plane_forward = (cam_forward - n * cam_forward.dot(n)).normalize_or_zero();
+		if plane_forward.length_squared() < 1e-4 {
+			plane_forward = (Vec3::Y - n * n.dot(Vec3::Y)).normalize_or_zero();
+		}
+		let plane_right = n.cross(plane_forward).normalize_or_zero();
+
+		// Input mapping to climb params (demo-style)
 		let move2d = input.move2d;
-
-		let lateral = right_tangent * move2d.x * cfg.lateral_speed;
-		let vertical_speed = if move2d.y >= 0.0 {
+		let climb_speed = if move2d.y >= 0.0 {
 			cfg.up_speed
 		} else {
 			cfg.down_speed
 		};
-		let vertical = up_tangent * move2d.y.abs() * vertical_speed;
+		let desired_climb_velocity = Vec3::Y * (move2d.y * climb_speed);
 
-		// Adhesion PD toward target wall distance (derivative term omitted for
-		// kinematic simplicity)
-		let distance_error = contact.distance - cfg.target_distance; // positive => too far, move inward
-		let adhesion_speed =
-			(cfg.adhesion_kp * distance_error).clamp(-cfg.max_inward_speed, cfg.max_inward_speed);
-		let adhesion = -normal * adhesion_speed;
+		let inward = -n;
+		let direction_to_anchor = (inward - Vec3::Y * inward.dot(Vec3::Y)).normalize_or_zero();
+		let desired_vec_to_anchor = direction_to_anchor * 0.3;
 
-		// Desired plane motion; ensure no normal component in the tangential wish
-		let mut wish = lateral + vertical;
-		wish -= normal * wish.dot(normal);
-		let desired = wish + adhesion;
+		let desired_forward = bevy::math::Dir3::new(direction_to_anchor).ok();
+		let initiation_direction =
+			(plane_right * move2d.x + plane_forward * move2d.y).normalize_or_zero();
 
-		let dt = time.delta_secs();
-		if desired != Vec3::ZERO {
-			t.translation += desired * dt;
+		ctrl.action(TnuaBuiltinClimb {
+			climbable_entity: Some(blip.entity()),
+			anchor: blip.closest_point().get(),
+			desired_climb_velocity: desired_climb_velocity.into(),
+			desired_vec_to_anchor: desired_vec_to_anchor.into(),
+			desired_forward,
+			initiation_direction: initiation_direction.into(),
+			..Default::default()
+		});
+
+		// Do not override facing while climbing; let Tnua handle alignment via
+		// desired_forward
+
+		#[cfg(feature = "debug_gizmos")]
+		{
+			let _p = Vec3::ZERO;
 		}
-
-		// Update visual facing toward the surface (into the wall)
-		let target_dir = (-normal).normalize_or_zero();
-		if target_dir != Vec3::ZERO {
-			let current = player.facing.normalize_or_zero();
-			let target = target_dir;
-			let smooth = 0.2;
-			let dot = current.dot(target).clamp(-1.0, 1.0);
-			let angle = dot.acos();
-			if angle > 1e-4 {
-				let axis = current.cross(target).normalize_or_zero();
-				let step = angle * smooth;
-				let rot = Quat::from_axis_angle(axis, step);
-				let new_dir = (rot * current).normalize_or_zero();
-				if new_dir != Vec3::ZERO {
-					player.facing = new_dir;
-				}
-			} else {
-				player.facing = target;
-			}
-		}
-
-		debug!(
-			move2d = ?move2d,
-			right = ?right_tangent,
-			normal = ?normal,
-			lateral = ?lateral,
-			vertical = ?vertical,
-			adhesion = ?adhesion,
-			desired = ?desired,
-			pos = ?xf.translation(),
-			"climb: kinematic control"
-		);
 	}
 }

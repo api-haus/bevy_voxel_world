@@ -98,7 +98,7 @@ impl Locomotion {
 
 			#[cfg(feature = "debug_gizmos")]
 			{
-				let p = _player_xf.translation() + Vec3::Y * 0.8;
+				let p = _player_xf.translation() + Vec3::Y * 0.4;
 				let col = if boosting {
 					Color::srgb(1.0, 0.6, 0.2)
 				} else {

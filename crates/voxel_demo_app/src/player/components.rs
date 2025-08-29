@@ -31,7 +31,7 @@ pub struct PlayerConfig {
 impl Default for PlayerConfig {
 	fn default() -> Self {
 		Self {
-			walk_max_slope_rad: std::f32::consts::FRAC_PI_4, // 45° default
+			walk_max_slope_rad: std::f32::consts::FRAC_PI_3, // 60° default
 		}
 	}
 }
@@ -43,6 +43,9 @@ pub struct ClimbConfig {
 	pub up_speed: f32,
 	pub down_speed: f32,
 	pub lateral_speed: f32,
+	/// Desired adhesion distance from wall measured along hit.normal
+	/// Used for snap positioning: position = hit.point - hit.normal *
+	/// target_distance
 	pub target_distance: f32,
 	pub adhesion_kp: f32,
 	pub max_inward_speed: f32,

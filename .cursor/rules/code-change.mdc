@@ -1,5 +1,5 @@
 ---
-globs: crates/**,docs/**
+# globs: crates/**,docs/**
 alwaysApply: false
 ---
 ## Code Change Protocol

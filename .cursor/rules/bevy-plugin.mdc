@@ -32,40 +32,40 @@ pub struct PlayerPlugin;
 
 #[derive(SystemSet, Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum PlayerSet {
-    Input,
-    Movement,
-    Post,
+	Input,
+	Movement,
+	Post,
 }
 
 impl Plugin for PlayerPlugin {
-    fn build(&self, app: &mut App) {
-        app
-            .init_resource::<player::config::PlayerConfig>()
-            .add_event::<player::actions::PlayerPunchEvent>()
-            .configure_sets(
-                Update,
-                (PlayerSet::Input, PlayerSet::Movement, PlayerSet::Post).chain(),
-            )
-            .add_systems(Startup, player::spawn::spawn_player)
-            .add_systems(
-                Update,
-                (
-                    player::actions::read_actions.in_set(PlayerSet::Input),
-                    player::movement::apply_movement.in_set(PlayerSet::Movement),
-                    player::movement::visualize_player_movement.in_set(PlayerSet::Post),
-                ),
-            );
-    }
+	fn build(&self, app: &mut App) {
+		app
+			.init_resource::<player::config::PlayerConfig>()
+			.add_event::<player::actions::PlayerPunchEvent>()
+			.configure_sets(
+				Update,
+				(PlayerSet::Input, PlayerSet::Movement, PlayerSet::Post).chain(),
+			)
+			.add_systems(Startup, player::spawn::spawn_player)
+			.add_systems(
+				Update,
+				(
+					player::actions::read_actions.in_set(PlayerSet::Input),
+					player::movement::apply_movement.in_set(PlayerSet::Movement),
+					player::movement::visualize_player_movement.in_set(PlayerSet::Post),
+				),
+			);
+	}
 }
 ```
 
 #### `lib.rs` usage
 ```rust
 app.add_plugins((
-    PlayerPlugin,
-    CameraPlugin,
-    AtmospherePlugin,
-    // other feature plugins...
+	PlayerPlugin,
+	CameraPlugin,
+	AtmospherePlugin,
+	// other feature plugins...
 ));
 ```
 

@@ -1,4 +1,7 @@
 use bevy::prelude::*;
+use bevy_tnua::math::AsF32;
+use bevy_tnua::radar_lens::TnuaRadarLens;
+use bevy_tnua_avian3d::TnuaSpatialExtAvian3d;
 
 use crate::player::states::{PlayerMoveState, PlayerTransitionIntent};
 
@@ -6,17 +9,20 @@ pub fn from_locomotion(
 	mut ev: EventWriter<PlayerTransitionIntent>,
 	q_player: Query<
 		(
-			Option<&crate::player::states::climb::ClimbContact>,
 			&crate::player::components::Player,
 			Option<&crate::player::states::climb::ClimbSuppress>,
+			&crate::player::input::PlayerInput,
+			&bevy_tnua::TnuaObstacleRadar,
 		),
 		With<crate::player::components::Player>,
 	>,
+	q_cam: Query<&GlobalTransform, (With<Camera3d>, Without<crate::player::components::Player>)>,
 	q_actions: Query<
 		&leafwing_input_manager::prelude::ActionState<crate::player::actions::PlayerAction>,
 		With<crate::player::components::Player>,
 	>,
 	state: Res<State<PlayerMoveState>>,
+	spatial_ext: TnuaSpatialExtAvian3d,
 ) {
 	// Only evaluate while in Locomotion to avoid conflicting intents
 	if state.get() != &PlayerMoveState::Locomotion {
@@ -40,24 +46,48 @@ pub fn from_locomotion(
 		return;
 	}
 
-	// Climb detection: contact exists AND pushing roughly into the surface, and no
-	// suppression active
-	if let Ok((maybe_contact, player, maybe_suppress)) = q_player.single() {
+	// Climb detection: radar finds a near-vertical surface in front, and no
+	// suppression
+	if let Ok((_player, maybe_suppress, input, radar)) = q_player.single() {
 		let suppressed = maybe_suppress.map(|s| s.0 > 0.0).unwrap_or(false);
 		if suppressed {
 			return;
 		}
-		if let Some(contact) = maybe_contact {
-			let facing = player.facing.normalize_or_zero();
-			let toward_surface = contact.normal.dot(facing) < -0.2;
-			if toward_surface {
-				tracing::info!("transition intent: Locomotion -> Climb (steep surface, pushing in)");
-				ev.write(PlayerTransitionIntent {
-					to: PlayerMoveState::Climb,
-					priority: 100,
-					reason: "climb_contact_pushing",
-				});
+		let radar_lens = TnuaRadarLens::new(radar, &spatial_ext);
+
+		let cam_yaw_forward = || -> Vec3 {
+			if let Some(xf) = q_cam.iter().next() {
+				let f = xf.compute_transform().forward();
+				Vec3::new(f.x, 0.0, f.z).normalize_or_zero()
+			} else {
+				Vec3::Z
 			}
+		};
+
+		let yaw_fwd = cam_yaw_forward();
+		let yaw_right = yaw_fwd.cross(Vec3::Y).normalize_or_zero();
+		let move2d = input.move2d;
+		let wish_dir = (yaw_right * move2d.x + yaw_fwd * move2d.y).normalize_or_zero();
+
+		let mut found_valid_surface = false;
+		for blip in radar_lens.iter_blips() {
+			let n = blip.normal_from_closest_point().f32().normalize_or_zero();
+			let slope_from_horizontal = (n.dot(Vec3::Y).abs()).clamp(0.0, 1.0).acos();
+			let near_vertical = slope_from_horizontal > std::f32::consts::FRAC_PI_4;
+			let pushing_in = wish_dir.length() > 0.1 && n.dot(wish_dir) < -0.2;
+			if near_vertical && pushing_in {
+				found_valid_surface = true;
+				break;
+			}
+		}
+
+		if found_valid_surface {
+			tracing::info!("transition intent: Locomotion -> Climb (radar, pushing in)");
+			ev.write(PlayerTransitionIntent {
+				to: PlayerMoveState::Climb,
+				priority: 100,
+				reason: "climb_contact_pushing",
+			});
 		}
 	}
 }

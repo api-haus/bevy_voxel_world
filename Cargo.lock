@@ -5674,6 +5674,7 @@ dependencies = [
  "iyes_perf_ui",
  "leafwing-input-manager",
  "leafwing_abilities",
+ "log",
  "rand 0.9.2",
  "tracing",
  "wasm-bindgen",

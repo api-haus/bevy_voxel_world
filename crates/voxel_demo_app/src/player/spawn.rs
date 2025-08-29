@@ -1,18 +1,12 @@
 use avian3d::prelude as avian;
-
 use bevy::prelude::*;
-
 use bevy_tnua::prelude::*;
-
 use leafwing_input_manager::prelude::*;
 
 use crate::player::abilities::PlayerAbility;
-
 use crate::player::actions::{PlayerAction, default_input_map};
-
 use crate::player::components::{Player, PlayerConfig, PlayerDimensions};
 use crate::player::input::PlayerInput;
-
 use crate::player::orientation::visor::attach_player_visor;
 
 pub fn setup_player(
@@ -57,6 +51,8 @@ pub fn setup_player(
 		TnuaController::default(),
 		// Proximity sensor allows querying grounding and enables one-way platform logic.
 		bevy_tnua::TnuaProximitySensor::default(),
+		// Obstacle radar for wall/obstacle interactions (e.g., climb)
+		bevy_tnua::TnuaObstacleRadar::new(radius + 0.1, height + 0.2),
 		// Leafwing: prefer inserting components directly over the deprecated bundle
 		ActionState::<PlayerAction>::default(),
 		default_input_map(),

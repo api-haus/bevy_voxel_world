@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-
 use tracing::info;
 
 pub mod climb;
@@ -110,7 +109,9 @@ impl Plugin for PlayerStatesPlugin {
 		// Sensors that feed transitions (e.g., climb contact detection)
 		app.add_systems(
 			FixedUpdate,
-			crate::player::states::climb::detect_climbable.in_set(PlayerStatesSet::Sense),
+			crate::player::states::climb::detect_climbable
+				.in_set(PlayerStatesSet::Sense)
+				.run_if(in_state(PlayerMoveState::Locomotion).or(in_state(PlayerMoveState::Climb))),
 		);
 
 		// Register states via macro (enter/decide/update/exit/post)
