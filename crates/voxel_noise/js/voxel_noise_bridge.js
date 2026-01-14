@@ -10,7 +10,12 @@ let module = null;
 // Top-level await: Block module from being "ready" until init completes.
 // This ensures any code importing this module waits for initialization.
 try {
-    const { default: createVoxelNoiseModule } = await import('/dist/voxel_noise.js');
+    // Compute module URL relative to document base (works with --public-url subpaths)
+    // In main thread: use document.baseURI
+    // In workers: use self.location which inherits the correct base
+    const base = typeof document !== 'undefined' ? document.baseURI : self.location.href;
+    const moduleUrl = new URL('dist/voxel_noise.js', base).href;
+    const { default: createVoxelNoiseModule } = await import(moduleUrl);
     module = await createVoxelNoiseModule();
     console.log('[voxel_noise] Module initialized in context:', typeof WorkerGlobalScope !== 'undefined' ? 'worker' : 'main');
 } catch (e) {
