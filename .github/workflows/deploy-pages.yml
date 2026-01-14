@@ -26,13 +26,13 @@ jobs:
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.64
+          version: 3.1.73
 
       - name: Cache Emscripten
         uses: actions/cache@v4
         with:
           path: ~/.emscripten_cache
-          key: ${{ runner.os }}-emsdk-3.1.64
+          key: ${{ runner.os }}-emsdk-3.1.73
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -55,9 +55,8 @@ jobs:
 
       - name: Install Trunk
         run: |
-          if ! command -v trunk &> /dev/null; then
-            cargo install trunk --locked
-          fi
+          curl -sL https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar xzf -
+          sudo mv trunk /usr/local/bin/
 
       - name: Build voxel_noise (Emscripten)
         working-directory: crates/voxel_noise
