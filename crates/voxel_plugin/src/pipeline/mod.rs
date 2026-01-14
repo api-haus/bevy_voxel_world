@@ -36,12 +36,12 @@
 pub mod types;
 
 // Stage implementations
+pub mod async_process;
 pub mod composition;
 pub mod meshing;
 pub mod presample;
 pub mod presentation;
 pub mod process;
-pub mod async_process;
 
 // Test utilities
 #[cfg(test)]
@@ -53,13 +53,11 @@ pub mod test_utils;
 mod consistency_test;
 
 // Re-exports
+// Async entry points (non-blocking, cross-platform)
+pub use async_process::{AsyncPipeline, BatchId, BatchPipeline, BatchResult};
+// Synchronous entry point
+pub use process::{process_transitions, process_transitions_timed, ProcessingStats};
 pub use types::{
   Epoch, GroupedMesh, MeshData, MeshInput, MeshResult, NodeMesh, PresampleOutput, PresentationHint,
   ReadyChunk, SampledVolume, VolumeSampler, WorkSource,
 };
-
-// Synchronous entry point
-pub use process::{process_transitions, process_transitions_timed, ProcessingStats};
-
-// Async entry points (non-blocking, cross-platform)
-pub use async_process::{AsyncPipeline, BatchId, BatchPipeline, BatchResult};

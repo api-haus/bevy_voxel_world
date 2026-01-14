@@ -11,9 +11,10 @@ use voxel_plugin::world::WorldId;
 // Re-use glam from bevy
 type DVec3 = bevy::math::DVec3;
 
+use voxel_plugin::pipeline::VolumeSampler;
+
 use crate::noise::{is_homogeneous, FastNoise2Terrain};
 use crate::resources::{ChunkEntityMap, LodMaterials, OctreeLodState};
-use voxel_plugin::pipeline::VolumeSampler;
 use crate::systems::entities::spawn_chunk_entity;
 use crate::systems::meshing::compute_neighbor_mask;
 use crate::FlyCamera;

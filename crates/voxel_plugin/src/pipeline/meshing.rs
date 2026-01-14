@@ -23,9 +23,8 @@
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 
-use web_time::Instant;
-
 use rayon::prelude::*;
+use web_time::Instant;
 
 use super::types::{MeshInput, MeshResult};
 use crate::surface_nets;

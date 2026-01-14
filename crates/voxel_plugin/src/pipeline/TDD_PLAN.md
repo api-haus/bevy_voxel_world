@@ -896,34 +896,41 @@ crates/voxel_plugin/src/
 ## Implementation Order (TDD Red-Green-Refactor)
 
 1. **Types first** (`types.rs`)
-  - Define all I/O structs
-  - No logic, just data structures
-  - No tests needed (data-only)
+
+- Define all I/O structs
+- No logic, just data structures
+- No tests needed (data-only)
 
 2. **Test utilities** (`test_utils.rs`)
-  - Mock samplers
-  - Fixture generators
-  - Run to verify utilities compile
+
+- Mock samplers
+- Fixture generators
+- Run to verify utilities compile
 
 3. **Stage 2: Prefilter** (most logic)
-  - Write tests in `prefilter_test.rs`
-  - Implement `prefilter.rs` until tests pass
+
+- Write tests in `prefilter_test.rs`
+- Implement `prefilter.rs` until tests pass
 
 4. **Stage 3: Meshing** (thin wrapper)
-  - Write tests in `meshing_test.rs`
-  - Implement `meshing.rs` wrapper
+
+- Write tests in `meshing_test.rs`
+- Implement `meshing.rs` wrapper
 
 5. **Stage 4: Composition** (grouping logic)
-  - Write tests in `composition_test.rs`
-  - Implement `composition.rs`
+
+- Write tests in `composition_test.rs`
+- Implement `composition.rs`
 
 6. **Stage 5: Presentation** (serialization)
-  - Write tests in `presentation_test.rs`
-  - Implement `presentation.rs`
+
+- Write tests in `presentation_test.rs`
+- Implement `presentation.rs`
 
 7. **Integration tests** (full pipeline)
-  - Write tests in `integration_test.rs`
-  - Wire up module exports in `mod.rs`
+
+- Write tests in `integration_test.rs`
+- Wire up module exports in `mod.rs`
 
 ---
 
@@ -943,13 +950,17 @@ crates/voxel_plugin/src/
 ## Open Questions
 
 1. **Missing mesh in group**: Should composition fail, or mark slot as empty?
-  - Recommendation: Mark as empty, renderer handles missing chunks
+
+- Recommendation: Mark as empty, renderer handles missing chunks
 
 2. **Orphan meshes**: MeshResult with no matching TransitionGroup?
-  - Recommendation: Error for REFINEMENT, allowed for INVALIDATION
+
+- Recommendation: Error for REFINEMENT, allowed for INVALIDATION
 
 3. **Output ordering**: Should ReadyChunks be sorted by priority?
-  - Recommendation: Yes, by distance from viewer (closest first)
+
+- Recommendation: Yes, by distance from viewer (closest first)
 
 4. **Timing aggregation**: Per-stage timing or per-chunk?
-  - Recommendation: Both - stage-level for profiling, chunk-level for debugging
+
+- Recommendation: Both - stage-level for profiling, chunk-level for debugging

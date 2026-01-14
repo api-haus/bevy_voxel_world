@@ -129,12 +129,14 @@ pub struct PresampleOutput {
 /// Volume-based sampler trait for SIMD-efficient batch sampling.
 ///
 /// Always samples 32x32x32 volumes in one call, enabling SIMD optimization.
-/// Inspired by FastNoise2's `fnGenUniformGrid3D` API with simplified parameters.
+/// Inspired by FastNoise2's `fnGenUniformGrid3D` API with simplified
+/// parameters.
 pub trait VolumeSampler: Send + Sync {
   /// Sample a 32x32x32 SDF volume.
   ///
   /// # Parameters
-  /// - `sample_start`: World-space origin of the volume (position of first sample)
+  /// - `sample_start`: World-space origin of the volume (position of first
+  ///   sample)
   /// - `voxel_size`: Distance between adjacent samples in world units
   /// - `volume`: Output buffer for SDF values (32³ = 32,768 i8 values)
   /// - `materials`: Output buffer for material IDs (32³ = 32,768 u8 values)

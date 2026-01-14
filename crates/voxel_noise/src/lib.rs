@@ -18,7 +18,8 @@
 //! ```bash
 //! make build  # Uses Emscripten toolchain
 //! ```
-//! This produces `voxel_noise.js` + `voxel_noise.wasm` with exported C functions.
+//! This produces `voxel_noise.js` + `voxel_noise.wasm` with exported C
+//! functions.
 
 mod native;
 
@@ -26,35 +27,41 @@ pub use native::NoiseNode;
 
 /// Encoded node tree presets (from FastNoise2 NoiseTool)
 pub mod presets {
-	/// Simple terrain - FBm with domain warp (working preset)
-	pub const SIMPLE_TERRAIN: &str =
-		"E@BBZEE@BD8JFgIECArXIzwECiQIw/UoPwkuAAE@BJDQAE@BC@AIEAJBwQDZmYmPwsAAIA/HAMAAHBCBA==";
+  /// Simple terrain - FBm with domain warp (working preset)
+  pub const SIMPLE_TERRAIN: &str =
+    "E@BBZEE@BD8JFgIECArXIzwECiQIw/UoPwkuAAE@BJDQAE@BC@AIEAJBwQDZmYmPwsAAIA/HAMAAHBCBA==";
 }
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use fastnoise2::SafeNode;
+  use fastnoise2::SafeNode;
 
-	#[test]
-	fn test_simple_terrain() {
-		let encoded = "E@BBZEE@BD8JFgIECArXIzwECiQIw/UoPwkuAAE@BJDQAE@BC@AIEAJBwQDZmYmPwsAAIA/HAMAAHBCBA==";
-		let result = SafeNode::from_encoded_node_tree(encoded);
-		match result {
-			Ok(node) => {
-				let mut output = vec![0.0f32; 32 * 32 * 32];
-				node.gen_uniform_grid_3d(
-					&mut output,
-					0.0, 0.0, 0.0,
-					32, 32, 32,
-					0.02, 0.02, 0.02,
-					1337,
-				);
-				assert!(output.iter().any(|&v| v != 0.0), "All values are zero");
-			}
-			Err(e) => {
-				panic!("Failed to create node: {:?}", e);
-			}
-		}
-	}
+  #[test]
+  fn test_simple_terrain() {
+    let encoded =
+      "E@BBZEE@BD8JFgIECArXIzwECiQIw/UoPwkuAAE@BJDQAE@BC@AIEAJBwQDZmYmPwsAAIA/HAMAAHBCBA==";
+    let result = SafeNode::from_encoded_node_tree(encoded);
+    match result {
+      Ok(node) => {
+        let mut output = vec![0.0f32; 32 * 32 * 32];
+        node.gen_uniform_grid_3d(
+          &mut output,
+          0.0,
+          0.0,
+          0.0,
+          32,
+          32,
+          32,
+          0.02,
+          0.02,
+          0.02,
+          1337,
+        );
+        assert!(output.iter().any(|&v| v != 0.0), "All values are zero");
+      }
+      Err(e) => {
+        panic!("Failed to create node: {:?}", e);
+      }
+    }
+  }
 }

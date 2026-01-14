@@ -10,13 +10,14 @@
 //! - Space/Shift: Move up/down
 //! - Ctrl: Sprint
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use rand::Rng;
 use rayon::prelude::*;
 use smallvec::SmallVec;
-use std::collections::HashMap;
-use std::sync::Arc;
 use voxel_bevy::components::{VoxelChunk, VoxelViewer};
 use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
 use voxel_bevy::noise::{is_homogeneous, FastNoise2Terrain};
@@ -26,7 +27,8 @@ use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
 use voxel_plugin::constants::SAMPLE_SIZE_CB;
 use voxel_plugin::octree::{
-  refine, OctreeConfig, OctreeNode, RefinementBudget, RefinementInput, TransitionGroup, TransitionType,
+  refine, OctreeConfig, OctreeNode, RefinementBudget, RefinementInput, TransitionGroup,
+  TransitionType,
 };
 use voxel_plugin::pipeline::AsyncPipeline;
 use voxel_plugin::surface_nets;
@@ -79,7 +81,8 @@ impl Plugin for NoiseLodPlugin {
   }
 }
 
-/// Remove FlyCamera and VoxelViewer components from main camera when leaving scene
+/// Remove FlyCamera and VoxelViewer components from main camera when leaving
+/// scene
 fn cleanup_camera(mut commands: Commands, camera_query: Query<Entity, With<crate::MainCamera>>) {
   if let Ok(camera_entity) = camera_query.single() {
     commands
@@ -90,47 +93,49 @@ fn cleanup_camera(mut commands: Commands, camera_query: Query<Entity, With<crate
 }
 
 /// Sampler source selection.
-/// Currently only FastNoise2, but designed for future samplers (SDF primitives, etc).
+/// Currently only FastNoise2, but designed for future samplers (SDF primitives,
+/// etc).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum SamplerSource {
-	/// FastNoise2 terrain with caves (native FFI or WASM JS bridge).
-	#[default]
-	FastNoise2,
+  /// FastNoise2 terrain with caves (native FFI or WASM JS bridge).
+  #[default]
+  FastNoise2,
 }
 
 impl SamplerSource {
-	/// Get display name for UI.
-	pub fn name(&self) -> &'static str {
-		match self {
-			Self::FastNoise2 => "FastNoise2",
-		}
-	}
+  /// Get display name for UI.
+  pub fn name(&self) -> &'static str {
+    match self {
+      Self::FastNoise2 => "FastNoise2",
+    }
+  }
 }
 
 /// UI settings resource for demo controls.
 #[derive(Resource)]
 struct UiSettings {
-	lod_colors_enabled: bool,
-	current_seed: i32,
-	prev_lod_colors_enabled: bool,
-	sampler_source: SamplerSource,
-	prev_sampler_source: SamplerSource,
+  lod_colors_enabled: bool,
+  current_seed: i32,
+  prev_lod_colors_enabled: bool,
+  sampler_source: SamplerSource,
+  prev_sampler_source: SamplerSource,
 }
 
 impl Default for UiSettings {
-	fn default() -> Self {
-		Self {
-			lod_colors_enabled: true,
-			current_seed: 1337,
-			prev_lod_colors_enabled: true,
-			sampler_source: SamplerSource::default(),
-			prev_sampler_source: SamplerSource::default(),
-		}
-	}
+  fn default() -> Self {
+    Self {
+      lod_colors_enabled: true,
+      current_seed: 1337,
+      prev_lod_colors_enabled: true,
+      sampler_source: SamplerSource::default(),
+      prev_sampler_source: SamplerSource::default(),
+    }
+  }
 }
 
 /// Async refinement state resource.
-/// Tracks in-flight refinement operations using the cross-platform TaskExecutor.
+/// Tracks in-flight refinement operations using the cross-platform
+/// TaskExecutor.
 #[derive(Resource)]
 struct AsyncRefinementState {
   pipeline: AsyncPipeline,
@@ -162,15 +167,18 @@ impl Default for AsyncRefinementState {
 /// Message to trigger world rebuild with new seed.
 #[derive(Message)]
 struct RebuildWorldEvent {
-	seed: i32,
-	sampler_source: SamplerSource,
+  seed: i32,
+  sampler_source: SamplerSource,
 }
 
 /// Create a volume sampler based on the selected noise source.
-fn create_sampler(sampler_source: SamplerSource, seed: i32) -> Box<dyn voxel_plugin::pipeline::VolumeSampler> {
-	match sampler_source {
-		SamplerSource::FastNoise2 => Box::new(FastNoise2Terrain::new(seed)),
-	}
+fn create_sampler(
+  sampler_source: SamplerSource,
+  seed: i32,
+) -> Box<dyn voxel_plugin::pipeline::VolumeSampler> {
+  match sampler_source {
+    SamplerSource::FastNoise2 => Box::new(FastNoise2Terrain::new(seed)),
+  }
 }
 
 /// Message to trigger LOD refinement at current viewer position.
@@ -212,22 +220,24 @@ fn setup(
   for x in -1..=1 {
     for y in -1..=1 {
       for z in -1..=1 {
-        world_root.world.leaves.insert(OctreeNode::new(x, y, z, INITIAL_LOD));
+        world_root
+          .world
+          .leaves
+          .insert(OctreeNode::new(x, y, z, INITIAL_LOD));
       }
     }
   }
 
-  info!("[NoiseLod] Initial leaves: {} (generating async)", world_root.world.leaves.len());
+  info!(
+    "[NoiseLod] Initial leaves: {} (generating async)",
+    world_root.world.leaves.len()
+  );
 
   // 4. Create per-LOD materials
   let lod_materials = create_lod_materials(&mut materials);
 
   // 5. Spawn VoxelWorldRoot entity (no meshes yet - async will generate them)
-  commands.spawn((
-    world_root,
-    Transform::default(),
-    SceneEntity,
-  ));
+  commands.spawn((world_root, Transform::default(), SceneEntity));
 
   // 6. Insert resources
   commands.insert_resource(ChunkEntityMap::default());
@@ -278,18 +288,18 @@ fn initial_mesh_gen(
     nodes_to_add: initial_nodes,
   };
 
-  info!("[InitialGen] Starting async generation for {} leaves", leaves.len());
+  info!(
+    "[InitialGen] Starting async generation for {} leaves",
+    leaves.len()
+  );
 
   // Create sampler and start async processing
   let sampler = FastNoise2Terrain::new(settings.current_seed);
 
-  let started = async_state.pipeline.start(
-    world_id,
-    vec![transition.clone()],
-    sampler,
-    leaves,
-    config,
-  );
+  let started =
+    async_state
+      .pipeline
+      .start(world_id, vec![transition.clone()], sampler, leaves, config);
 
   if started {
     // Store pending transitions for entity management after completion
@@ -449,7 +459,8 @@ fn ui_controls(
       ui.separator();
 
       // Async refinement status
-      let is_processing = async_state.pipeline.is_busy() || async_state.pending_transitions.is_some();
+      let is_processing =
+        async_state.pipeline.is_busy() || async_state.pending_transitions.is_some();
       ui.horizontal(|ui| {
         ui.label("Status:");
         if is_processing {
@@ -461,7 +472,10 @@ fn ui_controls(
 
       ui.horizontal(|ui| {
         ui.checkbox(&mut async_state.continuous, "Continuous");
-        if ui.add_enabled(!is_processing, egui::Button::new("Refine LOD")).clicked() {
+        if ui
+          .add_enabled(!is_processing, egui::Button::new("Refine LOD"))
+          .clicked()
+        {
           refine_events.write(RefineWorldEvent);
         }
       });
@@ -497,7 +511,11 @@ fn ui_controls(
         egui::ComboBox::from_id_salt("sampler_source")
           .selected_text(settings.sampler_source.name())
           .show_ui(ui, |ui| {
-            ui.selectable_value(&mut settings.sampler_source, SamplerSource::FastNoise2, "FastNoise2");
+            ui.selectable_value(
+              &mut settings.sampler_source,
+              SamplerSource::FastNoise2,
+              "FastNoise2",
+            );
           });
       });
 
@@ -580,7 +598,8 @@ fn rebuild_world(
   world_chunk_map.remove_world(world_id);
 
   // Create new terrain sampler with the selected noise source
-  // We need two copies: one for world_root (owned) and one for parallel sampling (Arc)
+  // We need two copies: one for world_root (owned) and one for parallel sampling
+  // (Arc)
   let sampler: Arc<dyn voxel_plugin::pipeline::VolumeSampler> = match event.sampler_source {
     SamplerSource::FastNoise2 => Arc::new(FastNoise2Terrain::new(event.seed)),
   };
@@ -736,15 +755,11 @@ fn start_refinement(
   let transitions = output.transition_groups.clone();
 
   // Start async mesh generation (non-blocking)
-  // Check return value - should always succeed due to is_busy() guard at function start,
-  // but be defensive to avoid pending_transitions/pipeline mismatch.
-  let started = async_state.pipeline.start(
-    world_id,
-    transitions.clone(),
-    sampler,
-    leaves,
-    config,
-  );
+  // Check return value - should always succeed due to is_busy() guard at function
+  // start, but be defensive to avoid pending_transitions/pipeline mismatch.
+  let started = async_state
+    .pipeline
+    .start(world_id, transitions.clone(), sampler, leaves, config);
 
   if started {
     // Store pending transitions for entity management after completion
@@ -846,7 +861,10 @@ fn poll_async_refinement(
   }
 
   if skipped > 0 {
-    warn!("[Refine] Skipped {} stale nodes (no longer leaves)", skipped);
+    warn!(
+      "[Refine] Skipped {} stale nodes (no longer leaves)",
+      skipped
+    );
   }
 }
 

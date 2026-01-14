@@ -32,14 +32,13 @@
   </style>
 
   <!-- FastNoise2 Emscripten module (built by voxel_noise/Makefile) -->
-  <link data-trunk rel="copy-dir" href="../voxel_noise/dist" data-target-path="dist"/>
+  <link data-target-path="dist" data-trunk href="../voxel_noise/dist" rel="copy-dir"/>
 
   <!-- JS bridge for FastNoise2 (auto-initializes in each worker) -->
-  <link data-trunk rel="copy-dir" href="../voxel_noise/js" data-target-path="js"/>
+  <link data-target-path="js" data-trunk href="../voxel_noise/js" rel="copy-dir"/>
 
   <link data-trunk data-wasm-opt="0" rel="rust"/>
 </head>
 <body>
-  <div id="loading">Loading...</div>
 </body>
 </html>

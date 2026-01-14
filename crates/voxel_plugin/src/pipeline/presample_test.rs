@@ -3,7 +3,7 @@
 //! Sample full 32³ volume, check homogeneity.
 
 use super::{presample_batch, presample_node};
-use crate::constants::{SAMPLE_SIZE, SAMPLE_SIZE_CB};
+use crate::constants::SAMPLE_SIZE_CB;
 use crate::octree::OctreeNode;
 use crate::pipeline::test_utils::*;
 use crate::pipeline::types::{VolumeSampler, WorkSource};
@@ -287,7 +287,11 @@ fn test_samples_at_correct_positions_lod_0() {
 
   // Check start position is at node origin
   let min = config.get_node_min(&node);
-  let recorded_start = sampler.start.lock().unwrap().expect("Should have recorded start");
+  let recorded_start = sampler
+    .start
+    .lock()
+    .unwrap()
+    .expect("Should have recorded start");
   assert!(
     (recorded_start[0] - min.x).abs() < 0.001,
     "Sample start X should be at node min"
@@ -303,7 +307,11 @@ fn test_samples_at_correct_positions_lod_0() {
 
   // Check voxel size is correct for LOD 0
   let expected_voxel_size = config.get_voxel_size(node.lod);
-  let recorded_voxel_size = sampler.voxel_size.lock().unwrap().expect("Should have recorded voxel size");
+  let recorded_voxel_size = sampler
+    .voxel_size
+    .lock()
+    .unwrap()
+    .expect("Should have recorded voxel size");
   assert!(
     (recorded_voxel_size - expected_voxel_size).abs() < 0.001,
     "Voxel size should be {} at LOD 0, got {}",
