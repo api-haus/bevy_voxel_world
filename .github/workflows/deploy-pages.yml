@@ -41,20 +41,16 @@ jobs:
           targets: wasm32-unknown-unknown,wasm32-unknown-emscripten
           components: rust-src
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
+      - name: Cache Rust compilation
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/
-            ~/.cargo/git/
-            target/
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-wasm-
+          # Cache both wasm targets
+          shared-key: wasm-build
+          # Include fastnoise2-sys in cache but clean CMake artifacts below
+          cache-on-failure: true
 
       - name: Clean stale CMake caches (EMSDK path changes each run)
-        run: rm -rf target/wasm32-unknown-emscripten/release/build/fastnoise2-sys-*
+        run: rm -rf target/wasm32-unknown-emscripten/release/build/fastnoise2-sys-*/out
 
       - name: Install Trunk
         run: |
