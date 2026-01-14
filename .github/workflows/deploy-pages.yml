@@ -64,7 +64,7 @@ jobs:
 
       - name: Build WASM
         working-directory: crates/voxel_game
-        run: trunk build --release --no-default-features --features wasm-atomics
+        run: trunk build --release --public-url /voxel_world/ --no-default-features --features wasm-atomics
 
       - name: Add coi-serviceworker for SharedArrayBuffer
         working-directory: crates/voxel_game/dist
