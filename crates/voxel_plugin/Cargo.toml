@@ -1,0 +1,34 @@
+[package]
+name = "voxel_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rayon = { workspace = true }
+glam = { version = "0.30", features = ["std"] }
+smallvec = "1.13"
+web-time = "1.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+fast-surface-nets = "0.2"
+# Noise library comparison benchmarks
+simdnoise = "3.1"
+fastnoise2 = { git = "https://github.com/api-haus/fastnoise2-rs", branch = "main" }
+
+[[bench]]
+name = "surface_nets_bench"
+harness = false
+
+[[bench]]
+name = "pipeline_bench"
+harness = false
+
+[[bench]]
+name = "noise_bench"
+harness = false
+
+[lib]

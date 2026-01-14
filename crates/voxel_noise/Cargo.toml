@@ -1,0 +1,19 @@
+[package]
+name = "voxel_noise"
+version = "0.1.0"
+edition = "2021"
+description = "FastNoise2 abstraction for native and WASM builds"
+
+[lib]
+name = "voxel_noise"
+path = "src/lib.rs"
+
+[[bin]]
+name = "voxel_noise"
+path = "src/wasm_main.rs"
+
+[dependencies]
+fastnoise2 = { git = "https://github.com/api-haus/fastnoise2-rs", branch = "main" }
+
+[features]
+default = []

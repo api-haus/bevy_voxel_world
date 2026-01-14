@@ -1,0 +1,28 @@
+[package]
+name = "voxel_bevy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+voxel_plugin = { path = "../voxel_plugin" }
+bevy = { workspace = true }
+rayon = { workspace = true }
+smallvec = "1.13"
+
+# Native: FastNoise2 via voxel_noise crate (direct FFI)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+voxel_noise = { path = "../voxel_noise" }
+
+# WASM: JS bridge to Emscripten-compiled FastNoise2 (per-worker init)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+
+[features]
+default = []
+# Stub feature for WASM builds (atomics handled at trunk level)
+wasm-atomics = []
+
+[dev-dependencies]
+rand = "0.9"

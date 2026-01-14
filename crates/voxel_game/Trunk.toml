@@ -1,0 +1,19 @@
+# Trunk configuration for WASM builds
+
+[build]
+# Default to release - debug builds have alignment issues with atomics in wasm-bindgen 0.2.106
+release = true
+# Disable default features (excludes dev and fastnoise2 for WASM)
+no_default_features = true
+
+[serve]
+port = 8080
+open = false
+# Required headers for SharedArrayBuffer (wasm-bindgen-rayon)
+headers = { "Cross-Origin-Opener-Policy" = "same-origin", "Cross-Origin-Embedder-Policy" = "require-corp" }
+
+# Build voxel_noise Emscripten module before main build
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "cd ../voxel_noise && make 2>/dev/null || echo '[voxel_noise] Skipped (run: source ~/emsdk/emsdk_env.sh)'"]
