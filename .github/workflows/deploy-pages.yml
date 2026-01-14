@@ -72,7 +72,7 @@ jobs:
       - name: Add coi-serviceworker for SharedArrayBuffer
         working-directory: crates/voxel_game/dist
         run: |
-          curl -sL https://raw.githubusercontent.com/nicoleahmed/coi-serviceworker/main/coi-serviceworker.min.js -o coi-serviceworker.js
+          curl -sL https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/master/coi-serviceworker.min.js -o coi-serviceworker.js
           # Inject service worker script at start of <head>
           sed -i 's|<head>|<head><script src="coi-serviceworker.js"></script>|' index.html
 
