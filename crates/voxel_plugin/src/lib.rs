@@ -70,15 +70,6 @@ pub use world::{VoxelWorld, WorldId};
 pub mod presentation;
 pub use presentation::{NullPresentation, PresentationLayer};
 
-// FastNoiseLite - portable noise generation with SIMD batch support
-pub mod fastnoise_lite;
-pub use fastnoise_lite::{
-	FastNoiseLite, NoiseType, FractalType, CellularDistanceFunction,
-	CellularReturnType, DomainWarpType, RotationType3D,
-};
-// Re-export SIMD batch functions for volume filling
-pub use fastnoise_lite::simd as noise_simd;
-
 // Cross-platform threading abstraction
 pub mod threading;
 pub use threading::{TaskExecutor, TaskId};
