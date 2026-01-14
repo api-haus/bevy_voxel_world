@@ -53,6 +53,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-wasm-
 
+      - name: Clean stale CMake caches (EMSDK path changes each run)
+        run: rm -rf target/wasm32-unknown-emscripten/release/build/fastnoise2-sys-*
+
       - name: Install Trunk
         run: |
           curl -sL https://github.com/trunk-rs/trunk/releases/latest/download/trunk-x86_64-unknown-linux-gnu.tar.gz | tar xzf -
