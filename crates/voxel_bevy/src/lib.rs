@@ -1,11 +1,10 @@
 //! Bevy presentation layer for voxel_plugin.
 //!
 //! This crate bridges the engine-independent voxel_plugin with Bevy,
-//! providing mesh rendering, LOD management, and procedural noise generation.
+//! providing mesh rendering and LOD management.
 
 pub mod components;
 pub mod fly_camera;
-pub mod noise;
 pub mod resources;
 pub mod systems;
 pub mod world;
@@ -19,7 +18,6 @@ mod consistency_test;
 use bevy::prelude::*;
 pub use components::*;
 pub use fly_camera::*;
-pub use noise::*;
 pub use resources::*;
 pub use world::{VoxelWorldRoot, WorldChunkMap};
 

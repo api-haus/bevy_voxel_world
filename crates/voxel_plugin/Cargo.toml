@@ -9,8 +9,15 @@ glam = { version = "0.30", features = ["std"] }
 smallvec = "1.13"
 web-time = "1.1"
 
+# Native: voxel_noise for FastNoise2 FFI wrapper
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+voxel_noise = { path = "../voxel_noise" }
+
+# WASM: wasm-bindgen for JS bridge to Emscripten module
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

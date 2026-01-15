@@ -20,7 +20,7 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 use voxel_bevy::components::{VoxelChunk, VoxelViewer};
 use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
-use voxel_bevy::noise::{is_homogeneous, FastNoise2Terrain};
+use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
 use voxel_bevy::resources::{ChunkEntityMap, LodMaterials};
 use voxel_bevy::systems::entities::spawn_chunk_entity;
 use voxel_bevy::systems::meshing::compute_neighbor_mask;
@@ -30,11 +30,10 @@ use voxel_plugin::octree::{
   refine, OctreeConfig, OctreeNode, RefinementBudget, RefinementInput, TransitionGroup,
   TransitionType,
 };
-use voxel_plugin::pipeline::AsyncPipeline;
+use voxel_plugin::pipeline::{AsyncPipeline, PipelineEvent};
 use voxel_plugin::surface_nets;
 use voxel_plugin::threading::TaskExecutor;
 use voxel_plugin::types::MeshConfig;
-use voxel_plugin::world::WorldId;
 
 use super::{Scene, SceneEntity};
 
@@ -139,25 +138,16 @@ impl Default for UiSettings {
 #[derive(Resource)]
 struct AsyncRefinementState {
   pipeline: AsyncPipeline,
-  /// Pending transitions that need entity management after mesh generation.
-  pending_transitions: Option<PendingRefinement>,
   /// Whether continuous refinement is enabled.
   continuous: bool,
   /// Frames since last refinement check (for throttling continuous mode).
   frames_since_check: u32,
 }
 
-/// Data needed to complete a refinement after async mesh generation.
-struct PendingRefinement {
-  world_id: WorldId,
-  transitions: Vec<TransitionGroup>,
-}
-
 impl Default for AsyncRefinementState {
   fn default() -> Self {
     Self {
       pipeline: AsyncPipeline::with_executor(Arc::new(TaskExecutor::default_threads())),
-      pending_transitions: None,
       continuous: false,
       frames_since_check: 0,
     }
@@ -264,7 +254,7 @@ fn initial_mesh_gen(
   }
 
   // Don't start if already processing
-  if async_state.pipeline.is_busy() || async_state.pending_transitions.is_some() {
+  if async_state.pipeline.is_busy() {
     info!("[InitialGen] Pipeline busy, skipping");
     return;
   }
@@ -299,15 +289,9 @@ fn initial_mesh_gen(
   let started =
     async_state
       .pipeline
-      .start(world_id, vec![transition.clone()], sampler, leaves, config);
+      .start(world_id, vec![transition], sampler, leaves, config);
 
   if started {
-    // Store pending transitions for entity management after completion
-    async_state.pending_transitions = Some(PendingRefinement {
-      world_id,
-      transitions: vec![transition],
-    });
-
     // Enable continuous refinement after initial gen completes
     async_state.continuous = true;
   } else {
@@ -459,8 +443,7 @@ fn ui_controls(
       ui.separator();
 
       // Async refinement status
-      let is_processing =
-        async_state.pipeline.is_busy() || async_state.pending_transitions.is_some();
+      let is_processing = async_state.pipeline.is_busy();
       ui.horizontal(|ui| {
         ui.label("Status:");
         if is_processing {
@@ -701,7 +684,7 @@ fn start_refinement(
   }
 
   // Don't start new refinement if one is in progress
-  if async_state.pipeline.is_busy() || async_state.pending_transitions.is_some() {
+  if async_state.pipeline.is_busy() {
     info!("[Refine] Already processing, skipping");
     return;
   }
@@ -752,24 +735,16 @@ fn start_refinement(
   // Create sampler and start async processing
   let sampler = FastNoise2Terrain::new(settings.current_seed);
   let leaves = world_root.world.leaves.as_set().clone();
-  let transitions = output.transition_groups.clone();
+  let transitions = output.transition_groups;
 
   // Start async mesh generation (non-blocking)
-  // Check return value - should always succeed due to is_busy() guard at function
-  // start, but be defensive to avoid pending_transitions/pipeline mismatch.
+  // Pipeline stores nodes_to_remove and emits them in poll_events()
   let started = async_state
     .pipeline
-    .start(world_id, transitions.clone(), sampler, leaves, config);
+    .start(world_id, transitions, sampler, leaves, config);
 
-  if started {
-    // Store pending transitions for entity management after completion
-    async_state.pending_transitions = Some(PendingRefinement {
-      world_id,
-      transitions,
-    });
-  } else {
+  if !started {
     // Should not happen - pipeline.is_busy() check at function start prevents this.
-    // If it does happen, world.leaves is now inconsistent with tracked transitions.
     warn!("[Refine] pipeline.start() returned false unexpectedly - state may be inconsistent");
   }
 }
@@ -786,12 +761,8 @@ fn poll_async_refinement(
   mut chunk_map: Option<ResMut<ChunkEntityMap>>,
   mut world_chunk_map: ResMut<WorldChunkMap>,
 ) {
-  // Poll for completion (non-blocking)
-  let Some(ready_chunks) = async_state.pipeline.poll() else {
-    return;
-  };
-
-  let Some(pending) = async_state.pending_transitions.take() else {
+  // Poll for events (non-blocking)
+  let Some(events) = async_state.pipeline.poll_events() else {
     return;
   };
 
@@ -808,63 +779,67 @@ fn poll_async_refinement(
   let config = world_root.config().clone();
   let use_lod_colors = settings.lod_colors_enabled;
 
-  // Build node -> entity map for quick lookup
-  let node_to_entity: HashMap<OctreeNode, Entity> = chunks
-    .iter()
-    .filter(|(_, chunk)| chunk.world_id == pending.world_id)
-    .map(|(entity, chunk)| (chunk.node, entity))
-    .collect();
+  // Process events in order (NodesExpired before ChunksReady)
+  for event in events {
+    match event {
+      PipelineEvent::NodesExpired { world_id, nodes } => {
+        // Build node -> entity map for quick lookup
+        let node_to_entity: HashMap<OctreeNode, Entity> = chunks
+          .iter()
+          .filter(|(_, chunk)| chunk.world_id == world_id)
+          .map(|(entity, chunk)| (chunk.node, entity))
+          .collect();
 
-  // Despawn old nodes
-  for group in &pending.transitions {
-    for node in &group.nodes_to_remove {
-      if let Some(&entity) = node_to_entity.get(node) {
-        commands.entity(entity).despawn();
-        if let Some(ref mut map) = chunk_map {
-          map.map.remove(node);
+        // Despawn expired nodes
+        for node in nodes {
+          if let Some(&entity) = node_to_entity.get(&node) {
+            commands.entity(entity).despawn();
+            if let Some(ref mut map) = chunk_map {
+              map.map.remove(&node);
+            }
+            world_chunk_map.remove(world_id, &node);
+          }
         }
-        world_chunk_map.remove(pending.world_id, node);
+      }
+      PipelineEvent::ChunksReady { world_id, chunks: ready_chunks } => {
+        // Spawn new chunks - only spawn if node is still in world.leaves
+        // This guards against stale ready_chunks from async timing gaps
+        let mut local_chunk_map = ChunkEntityMap::default();
+        let chunk_map_ref = if let Some(ref mut map) = chunk_map {
+          &mut **map
+        } else {
+          &mut local_chunk_map
+        };
+
+        let mut skipped = 0;
+        for ready in ready_chunks {
+          // Guard: only spawn if node is still a leaf (prevents orphan entities)
+          if !world_root.world.leaves.contains(&ready.node) {
+            skipped += 1;
+            continue;
+          }
+
+          spawn_chunk_entity_with_marker(
+            &mut commands,
+            &mut meshes,
+            lod_materials.get(ready.node.lod, use_lod_colors),
+            chunk_map_ref,
+            &mut world_chunk_map,
+            world_id,
+            ready.node,
+            &ready.output,
+            &config,
+          );
+        }
+
+        if skipped > 0 {
+          warn!(
+            "[Refine] Skipped {} stale nodes (no longer leaves)",
+            skipped
+          );
+        }
       }
     }
-  }
-
-  // Spawn new chunks - only spawn if node is still in world.leaves
-  // This guards against stale ready_chunks from async timing gaps
-  let mut local_chunk_map = ChunkEntityMap::default();
-  let chunk_map_ref = if let Some(ref mut map) = chunk_map {
-    &mut **map
-  } else {
-    &mut local_chunk_map
-  };
-
-  let mut skipped = 0;
-  for ready in ready_chunks {
-    // Guard: only spawn if node is still a leaf (prevents orphan entities)
-    if !world_root.world.leaves.contains(&ready.node) {
-      skipped += 1;
-      continue;
-    }
-
-    let mesh_output = mesh_data_to_output(&ready.mesh_data);
-
-    spawn_chunk_entity_with_marker(
-      &mut commands,
-      &mut meshes,
-      lod_materials.get(ready.node.lod, use_lod_colors),
-      chunk_map_ref,
-      &mut world_chunk_map,
-      pending.world_id,
-      ready.node,
-      &mesh_output,
-      &config,
-    );
-  }
-
-  if skipped > 0 {
-    warn!(
-      "[Refine] Skipped {} stale nodes (no longer leaves)",
-      skipped
-    );
   }
 }
 
@@ -878,7 +853,7 @@ fn continuous_refinement(
   }
 
   // Don't trigger if already processing
-  if async_state.pipeline.is_busy() || async_state.pending_transitions.is_some() {
+  if async_state.pipeline.is_busy() {
     return;
   }
 
@@ -893,39 +868,3 @@ fn continuous_refinement(
   refine_events.write(RefineWorldEvent);
 }
 
-/// Convert MeshData (bytes) back to MeshOutput (typed).
-/// This is needed because spawn_chunk_entity expects MeshOutput.
-fn mesh_data_to_output(data: &voxel_plugin::pipeline::MeshData) -> voxel_plugin::MeshOutput {
-  use voxel_plugin::types::Vertex;
-
-  let vertices: Vec<Vertex> = if data.vertices.is_empty() {
-    Vec::new()
-  } else {
-    let vertex_count = data.vertex_count as usize;
-    let mut verts = Vec::with_capacity(vertex_count);
-    unsafe {
-      let ptr = data.vertices.as_ptr() as *const Vertex;
-      verts.extend_from_slice(std::slice::from_raw_parts(ptr, vertex_count));
-    }
-    verts
-  };
-
-  let indices: Vec<u32> = if data.indices.is_empty() {
-    Vec::new()
-  } else {
-    let index_count = data.index_count as usize;
-    let mut idx = Vec::with_capacity(index_count);
-    unsafe {
-      let ptr = data.indices.as_ptr() as *const u32;
-      idx.extend_from_slice(std::slice::from_raw_parts(ptr, index_count));
-    }
-    idx
-  };
-
-  voxel_plugin::MeshOutput {
-    vertices,
-    indices,
-    displaced_positions: Vec::new(), // Not used when converting from MeshData
-    bounds: data.bounds,
-  }
-}

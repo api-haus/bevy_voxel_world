@@ -13,7 +13,7 @@ type DVec3 = bevy::math::DVec3;
 
 use voxel_plugin::pipeline::VolumeSampler;
 
-use crate::noise::{is_homogeneous, FastNoise2Terrain};
+use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
 use crate::resources::{ChunkEntityMap, LodMaterials, OctreeLodState};
 use crate::systems::entities::spawn_chunk_entity;
 use crate::systems::meshing::compute_neighbor_mask;

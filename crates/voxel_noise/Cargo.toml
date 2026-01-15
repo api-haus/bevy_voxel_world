@@ -2,7 +2,7 @@
 name = "voxel_noise"
 version = "0.1.0"
 edition = "2021"
-description = "FastNoise2 abstraction for native and WASM builds"
+description = "FastNoise2 native wrapper (Emscripten binary for WASM JS bridge)"
 
 [lib]
 name = "voxel_noise"

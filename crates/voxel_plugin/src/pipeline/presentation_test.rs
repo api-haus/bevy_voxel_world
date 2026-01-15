@@ -14,7 +14,6 @@ use super::{present, present_grouped, present_ungrouped};
 use crate::octree::{OctreeNode, TransitionType};
 use crate::pipeline::test_utils::*;
 use crate::pipeline::types::{GroupedMesh, NodeMesh, PresentationHint, WorkSource};
-use crate::types::Vertex;
 use crate::world::WorldId;
 
 /// Create a test WorldId for presentation tests.
@@ -95,46 +94,28 @@ fn test_invalidation_produces_immediate_hints() {
 }
 
 // =============================================================================
-// Batch 2: MeshData Serialization
+// Batch 2: MeshOutput Preservation
 // =============================================================================
 
 #[test]
-fn test_mesh_data_byte_format_correct_size() {
+fn test_mesh_output_preserved_in_ready_chunk() {
   let node = OctreeNode::new(0, 0, 0, 2);
   let mesh_result = mock_mesh_result(node, WorkSource::Invalidation);
   let vertex_count = mesh_result.output.vertices.len();
   let index_count = mesh_result.output.indices.len();
-
-  let chunks = present_ungrouped(test_world_id(), vec![mesh_result]);
-
-  let mesh_data = &chunks[0].mesh_data;
-  assert_eq!(mesh_data.vertex_count as usize, vertex_count);
-  assert_eq!(mesh_data.index_count as usize, index_count);
-  assert_eq!(
-    mesh_data.vertices.len(),
-    vertex_count * std::mem::size_of::<Vertex>()
-  );
-  assert_eq!(
-    mesh_data.indices.len(),
-    index_count * std::mem::size_of::<u32>()
-  );
-}
-
-#[test]
-fn test_mesh_data_preserves_bounds() {
-  let node = OctreeNode::new(0, 0, 0, 2);
-  let mesh_result = mock_mesh_result(node, WorkSource::Invalidation);
   let original_bounds = mesh_result.output.bounds;
 
   let chunks = present_ungrouped(test_world_id(), vec![mesh_result]);
 
-  let mesh_data = &chunks[0].mesh_data;
-  assert_eq!(mesh_data.bounds.min, original_bounds.min);
-  assert_eq!(mesh_data.bounds.max, original_bounds.max);
+  let output = &chunks[0].output;
+  assert_eq!(output.vertices.len(), vertex_count);
+  assert_eq!(output.indices.len(), index_count);
+  assert_eq!(output.bounds.min, original_bounds.min);
+  assert_eq!(output.bounds.max, original_bounds.max);
 }
 
 #[test]
-fn test_empty_mesh_produces_empty_mesh_data() {
+fn test_empty_mesh_preserved() {
   use crate::types::MeshOutput;
 
   let node = OctreeNode::new(0, 0, 0, 2);
@@ -148,10 +129,8 @@ fn test_empty_mesh_produces_empty_mesh_data() {
   let chunks = present_ungrouped(test_world_id(), vec![mesh_result]);
 
   assert_eq!(chunks.len(), 1);
-  assert_eq!(chunks[0].mesh_data.vertex_count, 0);
-  assert_eq!(chunks[0].mesh_data.index_count, 0);
-  assert!(chunks[0].mesh_data.vertices.is_empty());
-  assert!(chunks[0].mesh_data.indices.is_empty());
+  assert!(chunks[0].output.vertices.is_empty());
+  assert!(chunks[0].output.indices.is_empty());
 }
 
 // =============================================================================

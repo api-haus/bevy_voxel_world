@@ -75,7 +75,7 @@ use smallvec::SmallVec;
 
 use crate::constants::SAMPLE_SIZE_CB;
 use crate::octree::{OctreeNode, TransitionType};
-use crate::types::{MaterialId, MeshConfig, MeshOutput, MinMaxAABB, SdfSample};
+use crate::types::{MaterialId, MeshConfig, MeshOutput, SdfSample};
 use crate::world::WorldId;
 
 // =============================================================================
@@ -255,37 +255,7 @@ pub enum PresentationHint {
   FadeOut { group_key: OctreeNode },
 }
 
-/// Byte-level mesh data ready for FFI to game engines.
-#[derive(Clone)]
-pub struct MeshData {
-  /// Vertex data as raw bytes (Vertex struct layout).
-  pub vertices: Vec<u8>,
-
-  /// Index data as raw bytes (u32 layout).
-  pub indices: Vec<u8>,
-
-  /// Number of vertices.
-  pub vertex_count: u32,
-
-  /// Number of indices.
-  pub index_count: u32,
-
-  /// Mesh bounding box.
-  pub bounds: MinMaxAABB,
-}
-
-impl std::fmt::Debug for MeshData {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.debug_struct("MeshData")
-      .field("vertex_count", &self.vertex_count)
-      .field("index_count", &self.index_count)
-      .field("bounds", &self.bounds)
-      .finish()
-  }
-}
-
 /// Final output ready for rendering.
-#[derive(Debug)]
 pub struct ReadyChunk {
   /// The world this chunk belongs to.
   pub world_id: WorldId,
@@ -293,11 +263,54 @@ pub struct ReadyChunk {
   /// The node this chunk represents.
   pub node: OctreeNode,
 
-  /// Serialized mesh data.
-  pub mesh_data: MeshData,
+  /// Generated mesh output.
+  pub output: MeshOutput,
 
   /// Presentation hint for the renderer.
   pub hint: PresentationHint,
+}
+
+impl std::fmt::Debug for ReadyChunk {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("ReadyChunk")
+      .field("world_id", &self.world_id)
+      .field("node", &self.node)
+      .field("vertex_count", &self.output.vertices.len())
+      .field("hint", &self.hint)
+      .finish()
+  }
+}
+
+// =============================================================================
+// Pipeline Events (for presentation layer)
+// =============================================================================
+
+/// Events produced by the pipeline for presentation layers to consume.
+///
+/// Integration crates (voxel_bevy, voxel_unity, etc.) poll these events
+/// and handle presentation: spawning/despawning engine-specific entities.
+///
+/// Events are always emitted in order: `NodesExpired` before `ChunksReady`
+/// for the same refinement cycle.
+#[derive(Debug)]
+pub enum PipelineEvent {
+  /// Nodes should be despawned (their meshes are now stale).
+  ///
+  /// Emitted when refinement removes nodes from the octree (merge or subdivide).
+  /// Integration should despawn any entities for these nodes.
+  NodesExpired {
+    world_id: WorldId,
+    nodes: Vec<OctreeNode>,
+  },
+
+  /// Meshes are ready to spawn.
+  ///
+  /// Emitted after mesh generation completes for new/updated nodes.
+  /// Integration should create entities with these meshes.
+  ChunksReady {
+    world_id: WorldId,
+    chunks: Vec<ReadyChunk>,
+  },
 }
 
 // =============================================================================

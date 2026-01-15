@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use super::process::process_transitions;
 use crate::octree::{OctreeConfig, OctreeNode, TransitionGroup};
-use crate::pipeline::types::{ReadyChunk, VolumeSampler};
+use crate::pipeline::types::{PipelineEvent, ReadyChunk, VolumeSampler};
 use crate::threading::{TaskExecutor, TaskId};
 use crate::world::WorldId;
 
@@ -34,6 +34,9 @@ use crate::world::WorldId;
 pub struct AsyncPipeline {
   executor: Arc<TaskExecutor>,
   pending_task: Option<TaskId>,
+  /// Stored when start() is called, emitted with poll_events()
+  pending_world_id: Option<WorldId>,
+  pending_expired_nodes: Vec<OctreeNode>,
 }
 
 impl AsyncPipeline {
@@ -42,6 +45,8 @@ impl AsyncPipeline {
     Self {
       executor: Arc::new(TaskExecutor::new(num_threads)),
       pending_task: None,
+      pending_world_id: None,
+      pending_expired_nodes: Vec::new(),
     }
   }
 
@@ -50,6 +55,8 @@ impl AsyncPipeline {
     Self {
       executor: Arc::new(TaskExecutor::default_threads()),
       pending_task: None,
+      pending_world_id: None,
+      pending_expired_nodes: Vec::new(),
     }
   }
 
@@ -60,6 +67,8 @@ impl AsyncPipeline {
     Self {
       executor,
       pending_task: None,
+      pending_world_id: None,
+      pending_expired_nodes: Vec::new(),
     }
   }
 
@@ -86,6 +95,13 @@ impl AsyncPipeline {
       return false;
     }
 
+    // Extract nodes_to_remove from all transition groups for NodesExpired event
+    self.pending_expired_nodes = transition_groups
+      .iter()
+      .flat_map(|group| group.nodes_to_remove.iter().copied())
+      .collect();
+    self.pending_world_id = Some(world_id);
+
     // Spawn processing on background thread
     let task_id = self
       .executor
@@ -95,15 +111,58 @@ impl AsyncPipeline {
     true
   }
 
+  /// Poll for pipeline events (non-blocking).
+  ///
+  /// Returns `Some(events)` when processing completes, with events in order:
+  /// 1. `NodesExpired` - nodes that should be despawned
+  /// 2. `ChunksReady` - new meshes to spawn
+  ///
+  /// Returns `None` if still running or no task was started.
+  pub fn poll_events(&mut self) -> Option<Vec<PipelineEvent>> {
+    let task_id = self.pending_task?;
+    let world_id = self.pending_world_id?;
+
+    if let Some(chunks) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
+      self.pending_task = None;
+      self.pending_world_id = None;
+
+      let expired_nodes = std::mem::take(&mut self.pending_expired_nodes);
+
+      let mut events = Vec::with_capacity(2);
+
+      // NodesExpired always comes first (despawn before spawn)
+      if !expired_nodes.is_empty() {
+        events.push(PipelineEvent::NodesExpired {
+          world_id,
+          nodes: expired_nodes,
+        });
+      }
+
+      // ChunksReady with new meshes
+      if !chunks.is_empty() {
+        events.push(PipelineEvent::ChunksReady { world_id, chunks });
+      }
+
+      Some(events)
+    } else {
+      None
+    }
+  }
+
   /// Poll for completion (non-blocking).
   ///
   /// Returns `Some(chunks)` when processing completes, `None` if still running
   /// or no task was started.
+  ///
+  /// **Deprecated:** Use `poll_events()` instead for proper despawn/spawn ordering.
+  #[deprecated(since = "0.1.0", note = "Use poll_events() for proper event sequencing")]
   pub fn poll(&mut self) -> Option<Vec<ReadyChunk>> {
     let task_id = self.pending_task?;
 
     if let Some(result) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
       self.pending_task = None;
+      self.pending_world_id = None;
+      self.pending_expired_nodes.clear();
       Some(result)
     } else {
       None
@@ -116,6 +175,8 @@ impl AsyncPipeline {
   /// but results will be discarded.
   pub fn cancel(&mut self) {
     self.pending_task = None;
+    self.pending_world_id = None;
+    self.pending_expired_nodes.clear();
   }
 
   /// Get the number of worker threads.
@@ -151,11 +212,18 @@ impl BatchId {
   }
 }
 
-/// Result from a batch task.
+/// Result from a batch task (deprecated, use BatchEventResult).
+#[deprecated(since = "0.1.0", note = "Use poll_events() with BatchEventResult instead")]
 pub struct BatchResult {
   pub batch_id: BatchId,
   pub world_id: WorldId,
   pub chunks: Vec<ReadyChunk>,
+}
+
+/// Event-based result from a batch task.
+pub struct BatchEventResult {
+  pub batch_id: BatchId,
+  pub events: Vec<PipelineEvent>,
 }
 
 /// Pipeline that can process multiple batches concurrently.
@@ -164,7 +232,8 @@ pub struct BatchResult {
 /// in parallel.
 pub struct BatchPipeline {
   executor: Arc<TaskExecutor>,
-  pending: Vec<(BatchId, WorldId, TaskId)>,
+  /// (batch_id, world_id, task_id, expired_nodes)
+  pending: Vec<(BatchId, WorldId, TaskId, Vec<OctreeNode>)>,
 }
 
 impl BatchPipeline {
@@ -203,22 +272,64 @@ impl BatchPipeline {
   ) -> BatchId {
     let batch_id = BatchId::next();
 
+    // Extract nodes_to_remove for NodesExpired event
+    let expired_nodes: Vec<OctreeNode> = transition_groups
+      .iter()
+      .flat_map(|group| group.nodes_to_remove.iter().copied())
+      .collect();
+
     let task_id = self
       .executor
       .spawn(move || process_transitions(world_id, &transition_groups, &sampler, &leaves, &config));
 
-    self.pending.push((batch_id, world_id, task_id));
+    self.pending.push((batch_id, world_id, task_id, expired_nodes));
     batch_id
+  }
+
+  /// Poll for completed batches as events (non-blocking).
+  ///
+  /// Returns completed results with events in order:
+  /// 1. `NodesExpired` - nodes that should be despawned
+  /// 2. `ChunksReady` - new meshes to spawn
+  pub fn poll_events(&mut self) -> Vec<BatchEventResult> {
+    let mut completed = Vec::new();
+    let mut still_pending = Vec::new();
+
+    for (batch_id, world_id, task_id, expired_nodes) in self.pending.drain(..) {
+      if let Some(chunks) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
+        let mut events = Vec::with_capacity(2);
+
+        if !expired_nodes.is_empty() {
+          events.push(PipelineEvent::NodesExpired {
+            world_id,
+            nodes: expired_nodes,
+          });
+        }
+
+        if !chunks.is_empty() {
+          events.push(PipelineEvent::ChunksReady { world_id, chunks });
+        }
+
+        completed.push(BatchEventResult { batch_id, events });
+      } else {
+        still_pending.push((batch_id, world_id, task_id, expired_nodes));
+      }
+    }
+
+    self.pending = still_pending;
+    completed
   }
 
   /// Poll for any completed batches (non-blocking).
   ///
-  /// Returns completed results and removes them from pending.
+  /// **Deprecated:** Use `poll_events()` instead for proper despawn/spawn ordering.
+  #[deprecated(since = "0.1.0", note = "Use poll_events() for proper event sequencing")]
+  #[allow(deprecated)]
   pub fn poll(&mut self) -> Vec<BatchResult> {
     let mut completed = Vec::new();
     let mut still_pending = Vec::new();
 
-    for (batch_id, world_id, task_id) in self.pending.drain(..) {
+    for (batch_id, world_id, task_id, expired_nodes) in self.pending.drain(..) {
       if let Some(chunks) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
         completed.push(BatchResult {
           batch_id,
@@ -226,7 +337,7 @@ impl BatchPipeline {
           chunks,
         });
       } else {
-        still_pending.push((batch_id, world_id, task_id));
+        still_pending.push((batch_id, world_id, task_id, expired_nodes));
       }
     }
 
@@ -295,7 +406,7 @@ mod tests {
     let mut pipeline = AsyncPipeline::new(2);
 
     assert!(!pipeline.is_busy());
-    assert!(pipeline.poll().is_none());
+    assert!(pipeline.poll_events().is_none());
   }
 
   #[test]
@@ -314,7 +425,7 @@ mod tests {
     // Poll until complete
     let mut result = None;
     for _ in 0..1000 {
-      if let Some(r) = pipeline.poll() {
+      if let Some(r) = pipeline.poll_events() {
         result = Some(r);
         break;
       }
@@ -322,7 +433,8 @@ mod tests {
     }
 
     assert!(result.is_some());
-    assert!(result.unwrap().is_empty()); // No transitions = no chunks
+    // No transitions = no events (empty Vec)
+    assert!(result.unwrap().is_empty());
   }
 
   #[test]
@@ -353,7 +465,7 @@ mod tests {
     // Poll until all complete
     let mut results = Vec::new();
     for _ in 0..1000 {
-      results.extend(pipeline.poll());
+      results.extend(pipeline.poll_events());
       if results.len() >= 2 {
         break;
       }

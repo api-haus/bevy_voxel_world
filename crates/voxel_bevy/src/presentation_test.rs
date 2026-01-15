@@ -14,7 +14,7 @@ use voxel_plugin::octree::{
 use voxel_plugin::pipeline::process_transitions;
 use voxel_plugin::world::WorldId;
 
-use crate::noise::FastNoise2Terrain;
+use voxel_plugin::noise::FastNoise2Terrain;
 
 // =============================================================================
 // Mock Bevy Entity System

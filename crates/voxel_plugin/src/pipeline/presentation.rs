@@ -1,6 +1,6 @@
 //! Stage 5: Presentation
 //!
-//! Converts mesh data to byte arrays and assigns presentation hints.
+//! Assigns presentation hints to ready chunks.
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
@@ -11,61 +11,13 @@
 //! │   - Immediate       → Invalidation: swap mesh instantly                 │
 //! │   - FadeIn { key }  → Subdivide: fade in new children                   │
 //! │   - FadeOut { key } → Merge: fade out children, keep parent             │
-//! │                                                                         │
-//! │ MeshData format (for FFI to Unity/Godot):                               │
-//! │   - vertices: Vec<u8>   // Vertex struct as raw bytes                   │
-//! │   - indices: Vec<u8>    // u32 indices as raw bytes                     │
-//! │   - vertex_count: u32                                                   │
-//! │   - index_count: u32                                                    │
-//! │   - bounds: MinMaxAABB                                                  │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 
 use super::composition::CompositionOutput;
-use super::types::{GroupedMesh, MeshData, MeshResult, PresentationHint, ReadyChunk};
+use super::types::{GroupedMesh, MeshResult, PresentationHint, ReadyChunk};
 use crate::octree::TransitionType;
-use crate::types::{MeshOutput, Vertex};
 use crate::world::WorldId;
-
-/// Convert a MeshOutput to byte-level MeshData for FFI.
-fn mesh_output_to_data(output: &MeshOutput) -> MeshData {
-  let vertex_count = output.vertices.len() as u32;
-  let index_count = output.indices.len() as u32;
-
-  // Convert vertices to raw bytes
-  let vertices = if output.vertices.is_empty() {
-    Vec::new()
-  } else {
-    let vertex_bytes = std::mem::size_of::<Vertex>() * output.vertices.len();
-    let mut bytes = Vec::with_capacity(vertex_bytes);
-    unsafe {
-      let ptr = output.vertices.as_ptr() as *const u8;
-      bytes.extend_from_slice(std::slice::from_raw_parts(ptr, vertex_bytes));
-    }
-    bytes
-  };
-
-  // Convert indices to raw bytes
-  let indices = if output.indices.is_empty() {
-    Vec::new()
-  } else {
-    let index_bytes = std::mem::size_of::<u32>() * output.indices.len();
-    let mut bytes = Vec::with_capacity(index_bytes);
-    unsafe {
-      let ptr = output.indices.as_ptr() as *const u8;
-      bytes.extend_from_slice(std::slice::from_raw_parts(ptr, index_bytes));
-    }
-    bytes
-  };
-
-  MeshData {
-    vertices,
-    indices,
-    vertex_count,
-    index_count,
-    bounds: output.bounds,
-  }
-}
 
 /// Present grouped meshes as ready chunks.
 ///
@@ -88,7 +40,7 @@ pub fn present_grouped(world_id: WorldId, grouped: Vec<GroupedMesh>) -> Vec<Read
       chunks.push(ReadyChunk {
         world_id,
         node: node_mesh.node,
-        mesh_data: mesh_output_to_data(&node_mesh.output),
+        output: node_mesh.output,
         hint: hint.clone(),
       });
     }
@@ -106,7 +58,7 @@ pub fn present_ungrouped(world_id: WorldId, ungrouped: Vec<MeshResult>) -> Vec<R
     .map(|result| ReadyChunk {
       world_id,
       node: result.node,
-      mesh_data: mesh_output_to_data(&result.output),
+      output: result.output,
       hint: PresentationHint::Immediate,
     })
     .collect()

@@ -24,8 +24,7 @@
 //! 3. **Meshing**: Generates surface nets mesh from SDF volume (parallel via
 //!    rayon)
 //! 4. **Composition**: Groups meshes by TransitionGroup (9 nodes per group)
-//! 5. **Presentation**: Serializes mesh data with presentation hints
-//!    (FadeIn/FadeOut/Immediate)
+//! 5. **Presentation**: Assigns presentation hints (FadeIn/FadeOut/Immediate)
 //!
 //! # Work Sources
 //!
@@ -47,17 +46,14 @@ pub mod process;
 #[cfg(test)]
 pub mod test_utils;
 
-// Consistency tests
-#[cfg(test)]
-#[path = "consistency_test.rs"]
-mod consistency_test;
-
 // Re-exports
 // Async entry points (non-blocking, cross-platform)
-pub use async_process::{AsyncPipeline, BatchId, BatchPipeline, BatchResult};
+pub use async_process::{AsyncPipeline, BatchEventResult, BatchId, BatchPipeline};
+#[allow(deprecated)]
+pub use async_process::BatchResult;
 // Synchronous entry point
 pub use process::{process_transitions, process_transitions_timed, ProcessingStats};
 pub use types::{
-  Epoch, GroupedMesh, MeshData, MeshInput, MeshResult, NodeMesh, PresampleOutput, PresentationHint,
-  ReadyChunk, SampledVolume, VolumeSampler, WorkSource,
+  Epoch, GroupedMesh, MeshInput, MeshResult, NodeMesh, PipelineEvent, PresampleOutput,
+  PresentationHint, ReadyChunk, SampledVolume, VolumeSampler, WorkSource,
 };

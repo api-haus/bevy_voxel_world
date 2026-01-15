@@ -43,7 +43,7 @@ use voxel_plugin::threading::TaskExecutor;
 use voxel_plugin::world::WorldId;
 
 use crate::components::VoxelChunk;
-use crate::noise::FastNoise2Terrain;
+use voxel_plugin::noise::FastNoise2Terrain;
 
 // =============================================================================
 // Test Configuration

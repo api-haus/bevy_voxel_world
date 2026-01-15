@@ -66,10 +66,10 @@ pub mod pipeline;
 pub mod world;
 pub use world::{VoxelWorld, WorldId};
 
-// Presentation layer - engine bridge callbacks
-pub mod presentation;
-pub use presentation::{NullPresentation, PresentationLayer};
-
 // Cross-platform threading abstraction
 pub mod threading;
 pub use threading::{TaskExecutor, TaskId};
+
+// Noise generation with FastNoise2 (native + WASM)
+pub mod noise;
+pub use noise::FastNoise2Terrain;
