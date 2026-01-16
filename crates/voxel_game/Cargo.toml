@@ -19,7 +19,8 @@ voxel_bevy = { path = "../voxel_bevy" }
 bevy = { workspace = true }
 rayon = { workspace = true }
 smallvec = "1.13"
-bevy_egui = "0.38"
+bevy_egui = "0.39"
+leafwing-input-manager = "0.20"
 rand = "0.9"
 web-time = "1.1"
 

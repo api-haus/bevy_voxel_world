@@ -57,19 +57,18 @@ impl NoiseSampler {
 impl VolumeSampler for NoiseSampler {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    let [sx, sy, sz] = sample_start;
     for x in 0..SAMPLE_SIZE {
       for y in 0..SAMPLE_SIZE {
         for z in 0..SAMPLE_SIZE {
           let idx = x * SAMPLE_SIZE * SAMPLE_SIZE + y * SAMPLE_SIZE + z;
-          let wx = sx + x as f64 * voxel_size;
-          let wy = sy + y as f64 * voxel_size;
-          let wz = sz + z as f64 * voxel_size;
+          let wx = (grid_offset[0] + x as i64) as f64 * voxel_size;
+          let wy = (grid_offset[1] + y as i64) as f64 * voxel_size;
+          let wz = (grid_offset[2] + z as i64) as f64 * voxel_size;
 
           let fx = wx * self.frequency;
           let fy = wy * self.frequency;
@@ -131,19 +130,18 @@ impl TerrainSampler {
 impl VolumeSampler for TerrainSampler {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    let [sx, sy, sz] = sample_start;
     for xi in 0..SAMPLE_SIZE {
       for yi in 0..SAMPLE_SIZE {
         for zi in 0..SAMPLE_SIZE {
           let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
-          let x = sx + xi as f64 * voxel_size;
-          let y = sy + yi as f64 * voxel_size;
-          let z = sz + zi as f64 * voxel_size;
+          let x = (grid_offset[0] + xi as i64) as f64 * voxel_size;
+          let y = (grid_offset[1] + yi as i64) as f64 * voxel_size;
+          let z = (grid_offset[2] + zi as i64) as f64 * voxel_size;
 
           // Base terrain: distance from surface plane
           let surface_noise =
@@ -212,19 +210,18 @@ impl SphereSampler {
 impl VolumeSampler for SphereSampler {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    let [sx, sy, sz] = sample_start;
     for xi in 0..SAMPLE_SIZE {
       for yi in 0..SAMPLE_SIZE {
         for zi in 0..SAMPLE_SIZE {
           let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
-          let wx = sx + xi as f64 * voxel_size;
-          let wy = sy + yi as f64 * voxel_size;
-          let wz = sz + zi as f64 * voxel_size;
+          let wx = (grid_offset[0] + xi as i64) as f64 * voxel_size;
+          let wy = (grid_offset[1] + yi as i64) as f64 * voxel_size;
+          let wz = (grid_offset[2] + zi as i64) as f64 * voxel_size;
 
           let dx = wx - self.center[0];
           let dy = wy - self.center[1];
@@ -257,7 +254,7 @@ impl ConstantSampler {
 impl VolumeSampler for ConstantSampler {
   fn sample_volume(
     &self,
-    _sample_start: [f64; 3],
+    _grid_offset: [i64; 3],
     _voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
@@ -359,12 +356,12 @@ fn sample_full_volume<S: VolumeSampler>(
   let node_min = config.get_node_min(node);
   let voxel_size = config.get_voxel_size(node.lod);
 
-  sampler.sample_volume(
-    [node_min.x, node_min.y, node_min.z],
-    voxel_size,
-    &mut volume,
-    &mut materials,
-  );
+  let grid_offset = [
+    (node_min.x / voxel_size).round() as i64,
+    (node_min.y / voxel_size).round() as i64,
+    (node_min.z / voxel_size).round() as i64,
+  ];
+  sampler.sample_volume(grid_offset, voxel_size, &mut volume, &mut materials);
 
   (volume, materials)
 }

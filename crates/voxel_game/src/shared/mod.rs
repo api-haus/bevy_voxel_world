@@ -2,4 +2,4 @@
 
 pub mod egui_perf;
 
-pub use egui_perf::{EguiPerfPlugin, PerfEntries};
+pub use egui_perf::EguiPerfPlugin;

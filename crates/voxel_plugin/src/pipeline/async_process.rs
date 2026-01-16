@@ -1,72 +1,51 @@
 //! Async Pipeline Processor
 //!
-//! Non-blocking wrapper around `process_transitions` using the cross-platform
-//! `TaskExecutor`.
+//! Non-blocking wrapper around `process_transitions` using rayon and channels.
 //!
 //! # Usage
 //!
 //! ```ignore
-//! let mut pipeline = AsyncPipeline::new(4); // 4 worker threads
+//! let mut pipeline = AsyncPipeline::new();
 //!
 //! // Start processing (non-blocking)
 //! pipeline.start(world_id, transitions, sampler, leaves, config);
 //!
 //! // Poll each frame
-//! if let Some(ready_chunks) = pipeline.poll() {
-//!     // Present chunks to renderer
+//! if let Some(events) = pipeline.poll_events() {
+//!     for event in events {
+//!         // Handle PipelineEvent::NodesExpired, PipelineEvent::ChunksReady
+//!     }
 //! }
 //! ```
 
 use std::collections::HashSet;
-use std::sync::Arc;
+
+use crossbeam_channel::{self as channel, Receiver, TryRecvError};
 
 use super::process::process_transitions;
 use crate::octree::{OctreeConfig, OctreeNode, TransitionGroup};
 use crate::pipeline::types::{PipelineEvent, ReadyChunk, VolumeSampler};
-use crate::threading::{TaskExecutor, TaskId};
 use crate::world::WorldId;
 
 /// Non-blocking async pipeline processor.
 ///
-/// Wraps `process_transitions` to run on background threads without blocking
-/// the main thread. Works on native, emscripten, and falls back to synchronous
-/// execution on wasm32-unknown-unknown.
+/// Wraps `process_transitions` to run on rayon's thread pool without blocking
+/// the main thread. Uses channels for result delivery.
 pub struct AsyncPipeline {
-  executor: Arc<TaskExecutor>,
-  pending_task: Option<TaskId>,
+  /// Receiver for the pending task's result (None if idle)
+  receiver: Option<Receiver<Vec<ReadyChunk>>>,
   /// Stored when start() is called, emitted with poll_events()
   pending_world_id: Option<WorldId>,
   pending_expired_nodes: Vec<OctreeNode>,
 }
 
 impl AsyncPipeline {
-  /// Create a new async pipeline with the specified number of worker threads.
-  pub fn new(num_threads: usize) -> Self {
-    Self {
-      executor: Arc::new(TaskExecutor::new(num_threads)),
-      pending_task: None,
-      pending_world_id: None,
-      pending_expired_nodes: Vec::new(),
-    }
-  }
-
-  /// Create with default thread count (number of CPUs).
-  pub fn default_threads() -> Self {
-    Self {
-      executor: Arc::new(TaskExecutor::default_threads()),
-      pending_task: None,
-      pending_world_id: None,
-      pending_expired_nodes: Vec::new(),
-    }
-  }
-
-  /// Create using a shared executor.
+  /// Create a new async pipeline.
   ///
-  /// Useful when you want multiple pipelines to share the same thread pool.
-  pub fn with_executor(executor: Arc<TaskExecutor>) -> Self {
+  /// Thread count is managed by rayon's global thread pool.
+  pub fn new() -> Self {
     Self {
-      executor,
-      pending_task: None,
+      receiver: None,
       pending_world_id: None,
       pending_expired_nodes: Vec::new(),
     }
@@ -74,10 +53,7 @@ impl AsyncPipeline {
 
   /// Check if a task is currently running.
   pub fn is_busy(&self) -> bool {
-    self
-      .pending_task
-      .map(|id| self.executor.is_pending(id))
-      .unwrap_or(false)
+    self.receiver.is_some()
   }
 
   /// Start processing transitions (non-blocking).
@@ -102,12 +78,17 @@ impl AsyncPipeline {
       .collect();
     self.pending_world_id = Some(world_id);
 
-    // Spawn processing on background thread
-    let task_id = self
-      .executor
-      .spawn(move || process_transitions(world_id, &transition_groups, &sampler, &leaves, &config));
+    // Create channel for result
+    let (sender, receiver) = channel::bounded(1);
+    self.receiver = Some(receiver);
 
-    self.pending_task = Some(task_id);
+    // Spawn processing on rayon's thread pool
+    rayon::spawn(move || {
+      let result = process_transitions(world_id, &transition_groups, &sampler, &leaves, &config);
+      // Ignore send error (receiver dropped = task cancelled)
+      let _ = sender.send(result);
+    });
+
     true
   }
 
@@ -119,53 +100,41 @@ impl AsyncPipeline {
   ///
   /// Returns `None` if still running or no task was started.
   pub fn poll_events(&mut self) -> Option<Vec<PipelineEvent>> {
-    let task_id = self.pending_task?;
+    let receiver = self.receiver.as_ref()?;
     let world_id = self.pending_world_id?;
 
-    if let Some(chunks) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
-      self.pending_task = None;
-      self.pending_world_id = None;
+    match receiver.try_recv() {
+      Ok(chunks) => {
+        self.receiver = None;
+        self.pending_world_id = None;
 
-      let expired_nodes = std::mem::take(&mut self.pending_expired_nodes);
+        let expired_nodes = std::mem::take(&mut self.pending_expired_nodes);
 
-      let mut events = Vec::with_capacity(2);
+        let mut events = Vec::with_capacity(2);
 
-      // NodesExpired always comes first (despawn before spawn)
-      if !expired_nodes.is_empty() {
-        events.push(PipelineEvent::NodesExpired {
-          world_id,
-          nodes: expired_nodes,
-        });
+        // NodesExpired always comes first (despawn before spawn)
+        if !expired_nodes.is_empty() {
+          events.push(PipelineEvent::NodesExpired {
+            world_id,
+            nodes: expired_nodes,
+          });
+        }
+
+        // ChunksReady with new meshes
+        if !chunks.is_empty() {
+          events.push(PipelineEvent::ChunksReady { world_id, chunks });
+        }
+
+        Some(events)
       }
-
-      // ChunksReady with new meshes
-      if !chunks.is_empty() {
-        events.push(PipelineEvent::ChunksReady { world_id, chunks });
+      Err(TryRecvError::Empty) => None, // Still running
+      Err(TryRecvError::Disconnected) => {
+        // Sender dropped without sending (shouldn't happen)
+        self.receiver = None;
+        self.pending_world_id = None;
+        self.pending_expired_nodes.clear();
+        None
       }
-
-      Some(events)
-    } else {
-      None
-    }
-  }
-
-  /// Poll for completion (non-blocking).
-  ///
-  /// Returns `Some(chunks)` when processing completes, `None` if still running
-  /// or no task was started.
-  ///
-  /// **Deprecated:** Use `poll_events()` instead for proper despawn/spawn ordering.
-  #[deprecated(since = "0.1.0", note = "Use poll_events() for proper event sequencing")]
-  pub fn poll(&mut self) -> Option<Vec<ReadyChunk>> {
-    let task_id = self.pending_task?;
-
-    if let Some(result) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
-      self.pending_task = None;
-      self.pending_world_id = None;
-      self.pending_expired_nodes.clear();
-      Some(result)
-    } else {
-      None
     }
   }
 
@@ -174,201 +143,20 @@ impl AsyncPipeline {
   /// Note: The task will still run to completion on the worker thread,
   /// but results will be discarded.
   pub fn cancel(&mut self) {
-    self.pending_task = None;
+    self.receiver = None;
     self.pending_world_id = None;
     self.pending_expired_nodes.clear();
   }
 
-  /// Get the number of worker threads.
+  /// Get the number of worker threads in rayon's pool.
   pub fn num_threads(&self) -> usize {
-    self.executor.num_threads()
-  }
-
-  /// Get a reference to the underlying executor.
-  pub fn executor(&self) -> &Arc<TaskExecutor> {
-    &self.executor
+    rayon::current_num_threads()
   }
 }
 
 impl Default for AsyncPipeline {
   fn default() -> Self {
-    Self::default_threads()
-  }
-}
-
-// =============================================================================
-// Batch Pipeline - Process multiple worlds/transitions concurrently
-// =============================================================================
-
-/// Batch identifier for tracking multiple concurrent tasks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct BatchId(u64);
-
-impl BatchId {
-  fn next() -> Self {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    Self(COUNTER.fetch_add(1, Ordering::Relaxed))
-  }
-}
-
-/// Result from a batch task (deprecated, use BatchEventResult).
-#[deprecated(since = "0.1.0", note = "Use poll_events() with BatchEventResult instead")]
-pub struct BatchResult {
-  pub batch_id: BatchId,
-  pub world_id: WorldId,
-  pub chunks: Vec<ReadyChunk>,
-}
-
-/// Event-based result from a batch task.
-pub struct BatchEventResult {
-  pub batch_id: BatchId,
-  pub events: Vec<PipelineEvent>,
-}
-
-/// Pipeline that can process multiple batches concurrently.
-///
-/// Useful for multi-world scenarios or processing multiple transition groups
-/// in parallel.
-pub struct BatchPipeline {
-  executor: Arc<TaskExecutor>,
-  /// (batch_id, world_id, task_id, expired_nodes)
-  pending: Vec<(BatchId, WorldId, TaskId, Vec<OctreeNode>)>,
-}
-
-impl BatchPipeline {
-  /// Create a new batch pipeline.
-  pub fn new(num_threads: usize) -> Self {
-    Self {
-      executor: Arc::new(TaskExecutor::new(num_threads)),
-      pending: Vec::new(),
-    }
-  }
-
-  /// Create with default thread count.
-  pub fn default_threads() -> Self {
-    Self {
-      executor: Arc::new(TaskExecutor::default_threads()),
-      pending: Vec::new(),
-    }
-  }
-
-  /// Create using a shared executor.
-  pub fn with_executor(executor: Arc<TaskExecutor>) -> Self {
-    Self {
-      executor,
-      pending: Vec::new(),
-    }
-  }
-
-  /// Submit a batch for processing (non-blocking).
-  pub fn submit<S: VolumeSampler + Clone + 'static>(
-    &mut self,
-    world_id: WorldId,
-    transition_groups: Vec<TransitionGroup>,
-    sampler: S,
-    leaves: HashSet<OctreeNode>,
-    config: OctreeConfig,
-  ) -> BatchId {
-    let batch_id = BatchId::next();
-
-    // Extract nodes_to_remove for NodesExpired event
-    let expired_nodes: Vec<OctreeNode> = transition_groups
-      .iter()
-      .flat_map(|group| group.nodes_to_remove.iter().copied())
-      .collect();
-
-    let task_id = self
-      .executor
-      .spawn(move || process_transitions(world_id, &transition_groups, &sampler, &leaves, &config));
-
-    self.pending.push((batch_id, world_id, task_id, expired_nodes));
-    batch_id
-  }
-
-  /// Poll for completed batches as events (non-blocking).
-  ///
-  /// Returns completed results with events in order:
-  /// 1. `NodesExpired` - nodes that should be despawned
-  /// 2. `ChunksReady` - new meshes to spawn
-  pub fn poll_events(&mut self) -> Vec<BatchEventResult> {
-    let mut completed = Vec::new();
-    let mut still_pending = Vec::new();
-
-    for (batch_id, world_id, task_id, expired_nodes) in self.pending.drain(..) {
-      if let Some(chunks) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
-        let mut events = Vec::with_capacity(2);
-
-        if !expired_nodes.is_empty() {
-          events.push(PipelineEvent::NodesExpired {
-            world_id,
-            nodes: expired_nodes,
-          });
-        }
-
-        if !chunks.is_empty() {
-          events.push(PipelineEvent::ChunksReady { world_id, chunks });
-        }
-
-        completed.push(BatchEventResult { batch_id, events });
-      } else {
-        still_pending.push((batch_id, world_id, task_id, expired_nodes));
-      }
-    }
-
-    self.pending = still_pending;
-    completed
-  }
-
-  /// Poll for any completed batches (non-blocking).
-  ///
-  /// **Deprecated:** Use `poll_events()` instead for proper despawn/spawn ordering.
-  #[deprecated(since = "0.1.0", note = "Use poll_events() for proper event sequencing")]
-  #[allow(deprecated)]
-  pub fn poll(&mut self) -> Vec<BatchResult> {
-    let mut completed = Vec::new();
-    let mut still_pending = Vec::new();
-
-    for (batch_id, world_id, task_id, expired_nodes) in self.pending.drain(..) {
-      if let Some(chunks) = self.executor.poll::<Vec<ReadyChunk>>(task_id) {
-        completed.push(BatchResult {
-          batch_id,
-          world_id,
-          chunks,
-        });
-      } else {
-        still_pending.push((batch_id, world_id, task_id, expired_nodes));
-      }
-    }
-
-    self.pending = still_pending;
-    completed
-  }
-
-  /// Get the number of pending batches.
-  pub fn pending_count(&self) -> usize {
-    self.pending.len()
-  }
-
-  /// Check if any batches are pending.
-  pub fn is_busy(&self) -> bool {
-    !self.pending.is_empty()
-  }
-
-  /// Cancel all pending batches.
-  pub fn cancel_all(&mut self) {
-    self.pending.clear();
-  }
-
-  /// Get the number of worker threads.
-  pub fn num_threads(&self) -> usize {
-    self.executor.num_threads()
-  }
-}
-
-impl Default for BatchPipeline {
-  fn default() -> Self {
-    Self::default_threads()
+    Self::new()
   }
 }
 
@@ -383,7 +171,7 @@ mod tests {
   impl VolumeSampler for TestSampler {
     fn sample_volume(
       &self,
-      _sample_start: [f64; 3],
+      _grid_offset: [i64; 3],
       _voxel_size: f64,
       volume: &mut [i8; SAMPLE_SIZE_CB],
       materials: &mut [u8; SAMPLE_SIZE_CB],
@@ -403,7 +191,7 @@ mod tests {
 
   #[test]
   fn test_async_pipeline_empty() {
-    let mut pipeline = AsyncPipeline::new(2);
+    let mut pipeline = AsyncPipeline::new();
 
     assert!(!pipeline.is_busy());
     assert!(pipeline.poll_events().is_none());
@@ -411,7 +199,7 @@ mod tests {
 
   #[test]
   fn test_async_pipeline_process() {
-    let mut pipeline = AsyncPipeline::new(2);
+    let mut pipeline = AsyncPipeline::new();
 
     let world_id = WorldId::new();
     let config = OctreeConfig::default();
@@ -435,45 +223,5 @@ mod tests {
     assert!(result.is_some());
     // No transitions = no events (empty Vec)
     assert!(result.unwrap().is_empty());
-  }
-
-  #[test]
-  fn test_batch_pipeline() {
-    let mut pipeline = BatchPipeline::new(4);
-
-    let config = OctreeConfig::default();
-    let sampler = TestSampler;
-
-    // Submit multiple batches
-    let id1 = pipeline.submit(
-      WorldId::new(),
-      vec![],
-      sampler.clone(),
-      HashSet::new(),
-      config.clone(),
-    );
-    let id2 = pipeline.submit(
-      WorldId::new(),
-      vec![],
-      sampler.clone(),
-      HashSet::new(),
-      config.clone(),
-    );
-
-    assert_eq!(pipeline.pending_count(), 2);
-
-    // Poll until all complete
-    let mut results = Vec::new();
-    for _ in 0..1000 {
-      results.extend(pipeline.poll_events());
-      if results.len() >= 2 {
-        break;
-      }
-      std::thread::sleep(std::time::Duration::from_millis(1));
-    }
-
-    assert_eq!(results.len(), 2);
-    assert!(results.iter().any(|r| r.batch_id == id1));
-    assert!(results.iter().any(|r| r.batch_id == id2));
   }
 }

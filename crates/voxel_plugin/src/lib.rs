@@ -51,10 +51,6 @@ pub use types::{
 // Surface Nets module
 pub mod surface_nets;
 
-// Task queue for parallel meshing
-pub mod task_queue;
-pub use task_queue::{MeshCompletion, MeshRequest, MeshingStage};
-
 // Octree module for LOD-based spatial subdivision
 pub mod octree;
 pub use octree::OctreeNode;
@@ -66,10 +62,10 @@ pub mod pipeline;
 pub mod world;
 pub use world::{VoxelWorld, WorldId};
 
-// Cross-platform threading abstraction
-pub mod threading;
-pub use threading::{TaskExecutor, TaskId};
-
 // Noise generation with FastNoise2 (native + WASM)
 pub mod noise;
 pub use noise::FastNoise2Terrain;
+
+// Simple SDF samplers for testing
+pub mod sdf_samplers;
+pub use sdf_samplers::{BoxSampler, GroundPlaneSampler, SphereSampler, TiltedPlaneSampler};

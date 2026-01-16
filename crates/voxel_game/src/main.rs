@@ -1,12 +1,9 @@
-//! voxel_game - Bevy-based voxel meshing demos
+//! voxel_game - Bevy-based voxel meshing demo
 //!
-//! Multi-scene demo application showcasing different voxel techniques:
-//! - Metaballs: Animated SDF with per-frame Surface Nets remeshing
-//! - Noise LOD: Octree-based terrain with simdnoise (SIMD-accelerated)
+//! Octree-based LOD terrain with FastNoise2.
 //!
 //! Controls:
-//! - 1: Switch to Metaballs scene
-//! - 2: Switch to Noise LOD scene
+//! - 1: Switch to Noise LOD scene
 //! - Esc: Return to menu
 
 mod scenes;
@@ -15,10 +12,9 @@ mod shared;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
-use scenes::{
-  metaballs::MetaballsPlugin, noise_lod::NoiseLodPlugin, Scene, SceneEntity, ScenePlugin,
-};
+use scenes::{noise_lod::NoiseLodPlugin, sdf_test::SdfTestPlugin, Scene, ScenePlugin};
 use shared::EguiPerfPlugin;
+use voxel_bevy::CameraInputPlugin;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
@@ -65,10 +61,12 @@ fn run() {
     .add_plugins(FrameTimeDiagnosticsPlugin::default())
     .add_plugins(EguiPlugin::default())
     .add_plugins(EguiPerfPlugin)
+    // Input handling
+    .add_plugins(CameraInputPlugin)
     // Scene management
     .add_plugins(ScenePlugin)
-    .add_plugins(MetaballsPlugin)
     .add_plugins(NoiseLodPlugin)
+    .add_plugins(SdfTestPlugin)
     // Persistent camera (spawned once at startup, not tied to any scene)
     .add_systems(Startup, spawn_main_camera)
     // Menu scene
@@ -138,37 +136,35 @@ fn menu_ui(mut contexts: EguiContexts, mut next_state: ResMut<NextState<Scene>>)
       if ui
         .add_sized(
           button_size,
-          egui::Button::new(egui::RichText::new("1. Metaballs Demo").size(20.0)),
-        )
-        .clicked()
-      {
-        next_state.set(Scene::Metaballs);
-      }
-
-      ui.add_space(10.0);
-
-      ui.label(
-        egui::RichText::new("Animated metaballs with per-frame Surface Nets")
-          .size(14.0)
-          .color(egui::Color32::DARK_GRAY),
-      );
-
-      ui.add_space(30.0);
-
-      if ui
-        .add_sized(
-          button_size,
-          egui::Button::new(egui::RichText::new("2. Noise LOD Demo").size(20.0)),
+          egui::Button::new(egui::RichText::new("1. Noise LOD Demo").size(20.0)),
         )
         .clicked()
       {
         next_state.set(Scene::NoiseLod);
       }
 
-      ui.add_space(10.0);
-
+      ui.add_space(5.0);
       ui.label(
-        egui::RichText::new("Octree terrain with simdnoise SIMD-accelerated generation")
+        egui::RichText::new("Octree terrain with FastNoise2 generation")
+          .size(14.0)
+          .color(egui::Color32::DARK_GRAY),
+      );
+
+      ui.add_space(20.0);
+
+      if ui
+        .add_sized(
+          button_size,
+          egui::Button::new(egui::RichText::new("2. SDF Test Scene").size(20.0)),
+        )
+        .clicked()
+      {
+        next_state.set(Scene::SdfTest);
+      }
+
+      ui.add_space(5.0);
+      ui.label(
+        egui::RichText::new("Simple shapes (plane, sphere, box) for testing chunk tiling")
           .size(14.0)
           .color(egui::Color32::DARK_GRAY),
       );
@@ -176,7 +172,7 @@ fn menu_ui(mut contexts: EguiContexts, mut next_state: ResMut<NextState<Scene>>)
       ui.add_space(60.0);
 
       ui.label(
-        egui::RichText::new("Press 1, 2 to switch scenes | Esc to return to menu")
+        egui::RichText::new("Press 1 or 2 to start | Esc to return to menu")
           .size(14.0)
           .color(egui::Color32::from_rgb(100, 100, 100)),
       );
@@ -194,14 +190,14 @@ fn scene_keyboard_shortcuts(
   current_state: Res<State<Scene>>,
   mut next_state: ResMut<NextState<Scene>>,
 ) {
-  if keyboard.just_pressed(KeyCode::Digit1) && *current_state.get() != Scene::Metaballs {
-    info!("Switching to Metaballs scene");
-    next_state.set(Scene::Metaballs);
-  }
-
-  if keyboard.just_pressed(KeyCode::Digit2) && *current_state.get() != Scene::NoiseLod {
+  if keyboard.just_pressed(KeyCode::Digit1) && *current_state.get() != Scene::NoiseLod {
     info!("Switching to Noise LOD scene");
     next_state.set(Scene::NoiseLod);
+  }
+
+  if keyboard.just_pressed(KeyCode::Digit2) && *current_state.get() != Scene::SdfTest {
+    info!("Switching to SDF Test scene");
+    next_state.set(Scene::SdfTest);
   }
 
   if keyboard.just_pressed(KeyCode::Escape) && *current_state.get() != Scene::Menu {

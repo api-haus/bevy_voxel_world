@@ -2,18 +2,17 @@
 
 use bevy::prelude::*;
 use rayon::prelude::*;
-use voxel_plugin::constants::SAMPLE_SIZE_CB;
+use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
 use voxel_plugin::octree::{refine, OctreeConfig, OctreeLeaves, RefinementBudget, RefinementInput};
+use voxel_plugin::pipeline::sample_volume_for_node;
 use voxel_plugin::surface_nets;
 use voxel_plugin::types::MeshConfig;
 use voxel_plugin::world::WorldId;
 
-// Re-use glam from bevy
+// Re-use DVec3 from bevy
 type DVec3 = bevy::math::DVec3;
 
-use voxel_plugin::pipeline::VolumeSampler;
-
-use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
+use crate::input::fly_camera_input_bundle;
 use crate::resources::{ChunkEntityMap, LodMaterials, OctreeLodState};
 use crate::systems::entities::spawn_chunk_entity;
 use crate::systems::meshing::compute_neighbor_mask;
@@ -141,29 +140,21 @@ pub fn setup_octree_scene(
   let chunk_meshes: Vec<_> = leaf_nodes
     .par_iter()
     .filter_map(|node| {
-      let mut volume = Box::new([0i8; SAMPLE_SIZE_CB]);
-      let mut mats = Box::new([0u8; SAMPLE_SIZE_CB]);
+      // Use centralized sampling helper (handles apron offset)
+      let sampled = sample_volume_for_node(node, &sampler, &config);
 
-      let node_min = config.get_node_min(node);
-      let voxel_size = config.get_voxel_size(node.lod);
-      sampler.sample_volume(
-        [node_min.x, node_min.y, node_min.z],
-        voxel_size,
-        &mut volume,
-        &mut mats,
-      );
-
-      if is_homogeneous(&volume) {
+      if is_homogeneous(&sampled.volume) {
         return None;
       }
 
       let neighbor_mask = compute_neighbor_mask(node, &leaves, &config);
+      let voxel_size = config.get_voxel_size(node.lod);
 
       let mesh_config = MeshConfig::default()
         .with_voxel_size(voxel_size as f32)
         .with_neighbor_mask(neighbor_mask);
 
-      let output = surface_nets::generate(&volume, &mats, &mesh_config);
+      let output = surface_nets::generate(&sampled.volume, &sampled.materials, &mesh_config);
 
       if output.is_empty() {
         return None;
@@ -212,17 +203,18 @@ pub fn setup_octree_scene(
 
 /// Setup camera and lighting for the scene.
 fn setup_camera_and_lights(commands: &mut Commands) {
-  // Fly camera
-  commands.spawn((
-    Camera3d::default(),
-    Transform::from_translation(Vec3::new(0.0, 100.0, 100.0)).looking_at(Vec3::ZERO, Vec3::Y),
-    FlyCamera {
-      speed: 100.0,
-      sensitivity: 0.003,
-      yaw: 0.0,
-      pitch: -0.3,
-    },
-  ));
+	// Fly camera with input handling
+	commands.spawn((
+		Camera3d::default(),
+		Transform::from_translation(Vec3::new(0.0, 100.0, 100.0)).looking_at(Vec3::ZERO, Vec3::Y),
+		fly_camera_input_bundle(FlyCamera {
+			speed: 100.0,
+			mouse_sensitivity: 0.003,
+			gamepad_sensitivity: 2.0,
+			yaw: 0.0,
+			pitch: -0.3,
+		}),
+	));
 
   // Directional light (sun)
   commands.spawn((
@@ -235,7 +227,7 @@ fn setup_camera_and_lights(commands: &mut Commands) {
   ));
 
   // Ambient light
-  commands.insert_resource(AmbientLight {
+  commands.insert_resource(GlobalAmbientLight {
     color: Color::srgb(0.6, 0.7, 0.8),
     brightness: 200.0,
     affects_lightmapped_meshes: false,

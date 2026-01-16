@@ -4,23 +4,23 @@
 //! - Native: Uses `voxel_noise::NoiseNode` (fastnoise2 FFI)
 //! - WASM: Uses wasm-bindgen to call JS bridge to Emscripten module
 //!
-//! The `FastNoise2Terrain` sampler uses `NoiseNode` and works identically
-//! on both platforms.
+//! The `FastNoise2Terrain` sampler uses a single 3D noise graph directly
+//! as SDF values. Works identically on native and WASM.
 
 // Platform-specific NoiseNode implementations
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
 // Re-export unified NoiseNode
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::NoiseNode;
+pub use voxel_noise::NoiseNode;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::NoiseNode;
 
 // Terrain sampler (platform-agnostic, uses NoiseNode)
 mod terrain;
+#[cfg(test)]
+mod terrain_test;
 pub use terrain::FastNoise2Terrain;
 
 // Re-export presets
@@ -30,9 +30,8 @@ pub use voxel_noise::presets;
 // For WASM, define presets locally (voxel_noise isn't a dep for wasm32)
 #[cfg(target_arch = "wasm32")]
 pub mod presets {
-  /// Simple terrain - FBm with domain warp (working preset from NoiseTool)
-  pub const SIMPLE_TERRAIN: &str =
-    "E@BBZEE@BD8JFgIECArXIzwECiQIw/UoPwkuAAE@BJDQAE@BC@AIEAJBwQDZmYmPwsAAIA/HAMAAHBCBA==";
+  /// Simple terrain noise - FBm with domain warp (from NoiseTool built-in "Simple Terrain")
+  pub const SIMPLE_TERRAIN: &str = "E@BBZEE@BD8JFgIECArXIzwECiQIw/UoPwkuAAE@BJDQAE@BC@AIEAJBwQDZmYmPwsAAIA/HAMAAHBCBA==";
 }
 
 use crate::constants::SAMPLE_SIZE_CB;

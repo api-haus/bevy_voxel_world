@@ -47,10 +47,10 @@ pub mod process;
 pub mod test_utils;
 
 // Re-exports
-// Async entry points (non-blocking, cross-platform)
-pub use async_process::{AsyncPipeline, BatchEventResult, BatchId, BatchPipeline};
-#[allow(deprecated)]
-pub use async_process::BatchResult;
+// Async entry point (non-blocking, cross-platform)
+pub use async_process::AsyncPipeline;
+// Presample helpers for direct sampling (e.g., startup, debugging)
+pub use presample::sample_volume_for_node;
 // Synchronous entry point
 pub use process::{process_transitions, process_transitions_timed, ProcessingStats};
 pub use types::{

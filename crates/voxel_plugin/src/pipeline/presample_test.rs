@@ -260,18 +260,18 @@ fn test_samples_at_correct_positions_lod_0() {
   let node = OctreeNode::new(0, 0, 0, 0);
 
   struct PositionRecorder {
-    start: std::sync::Mutex<Option<[f64; 3]>>,
+    grid_offset: std::sync::Mutex<Option<[i64; 3]>>,
     voxel_size: std::sync::Mutex<Option<f64>>,
   }
   impl VolumeSampler for PositionRecorder {
     fn sample_volume(
       &self,
-      sample_start: [f64; 3],
+      grid_offset: [i64; 3],
       voxel_size: f64,
       volume: &mut [SdfSample; SAMPLE_SIZE_CB],
       materials: &mut [MaterialId; SAMPLE_SIZE_CB],
     ) {
-      *self.start.lock().unwrap() = Some(sample_start);
+      *self.grid_offset.lock().unwrap() = Some(grid_offset);
       *self.voxel_size.lock().unwrap() = Some(voxel_size);
       volume.fill(-10);
       materials.fill(0);
@@ -279,30 +279,30 @@ fn test_samples_at_correct_positions_lod_0() {
   }
 
   let sampler = PositionRecorder {
-    start: std::sync::Mutex::new(None),
+    grid_offset: std::sync::Mutex::new(None),
     voxel_size: std::sync::Mutex::new(None),
   };
 
   let _ = presample_node(node, WorkSource::Refinement, &sampler, &config);
 
-  // Check start position is at node origin
+  // Check grid offset is computed correctly: grid_offset = round(node_min / voxel_size)
+  // For node at (0,0,0) LOD 0: min = (0,0,0), voxel_size = 1.0, grid_offset = [0,0,0]
   let min = config.get_node_min(&node);
-  let recorded_start = sampler
-    .start
+  let voxel_size = config.get_voxel_size(node.lod);
+  let expected_offset = [
+    (min.x / voxel_size).round() as i64,
+    (min.y / voxel_size).round() as i64,
+    (min.z / voxel_size).round() as i64,
+  ];
+  let recorded_offset = sampler
+    .grid_offset
     .lock()
     .unwrap()
-    .expect("Should have recorded start");
-  assert!(
-    (recorded_start[0] - min.x).abs() < 0.001,
-    "Sample start X should be at node min"
-  );
-  assert!(
-    (recorded_start[1] - min.y).abs() < 0.001,
-    "Sample start Y should be at node min"
-  );
-  assert!(
-    (recorded_start[2] - min.z).abs() < 0.001,
-    "Sample start Z should be at node min"
+    .expect("Should have recorded grid_offset");
+  assert_eq!(
+    recorded_offset, expected_offset,
+    "Grid offset should be {:?}, got {:?}",
+    expected_offset, recorded_offset
   );
 
   // Check voxel size is correct for LOD 0

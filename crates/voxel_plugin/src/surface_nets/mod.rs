@@ -146,6 +146,7 @@ use crate::edge_table::*;
 use crate::types::sdf_conversion;
 use crate::types::*;
 
+
 // =============================================================================
 // Pass-based meshing pipeline
 // =============================================================================
@@ -249,7 +250,10 @@ pub fn generate(
   // =========================================================================
   // Pass 1: Geometry
   // =========================================================================
-  // Process all cells, emit vertices and triangles.
+  // Process cells [0, SAMPLE_SIZE-2] (i.e., 0..31 for 32³ samples).
+  // Each cell needs samples at its 8 corners, so the last valid cell index
+  // is SAMPLE_SIZE - 2. The boundary check (pos[u]==0 || pos[v]==0) prevents
+  // duplicate quad generation at chunk boundaries.
   // Normals are set to placeholder [0, 1, 0].
   for x in 0..(SAMPLE_SIZE - 1) {
     for y in 0..(SAMPLE_SIZE - 1) {
@@ -455,7 +459,8 @@ fn emit_triangles(
     let u = (axis + 1) % 3;
     let v = (axis + 2) % 3;
 
-    // Skip boundary positions to prevent duplicate quads
+    // Skip boundary positions to prevent duplicate quads.
+    // Matches C# NaiveSurfaceNets: only check perpendicular axes at 0.
     let pos_arr = [x, y, z];
     if pos_arr[u] == 0 || pos_arr[v] == 0 {
       continue;
@@ -484,52 +489,20 @@ fn emit_triangles(
       continue;
     }
 
-    // Get vertex positions for shorter diagonal calculation
-    let p_a = output.displaced_positions[v_a as usize];
-    let p_b = output.displaced_positions[v_b as usize];
-    let p_c = output.displaced_positions[v_c as usize];
-    let p_d = output.displaced_positions[v_d as usize];
-
-    // Calculate diagonal lengths squared
-    // Diagonal 1: A-B (opposite corners)
-    // Diagonal 2: C-D (other opposite corners)
-    let diag_ab = dist_sq(p_a, p_b);
-    let diag_cd = dist_sq(p_c, p_d);
-
-    // Split along shorter diagonal for better triangle quality
-    if diag_ab < diag_cd {
-      // Split along A-B diagonal
-      if flip {
-        output.indices.extend_from_slice(&[
-          v_a as u32, v_d as u32, v_b as u32, v_a as u32, v_b as u32, v_c as u32,
-        ]);
-      } else {
-        output.indices.extend_from_slice(&[
-          v_a as u32, v_b as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32,
-        ]);
-      }
+    // Emit two triangles forming the quad
+    // Matching C# NaiveSurfaceNets exactly:
+    // flip=true:  (A,B,C), (A,D,B)
+    // flip=false: (A,B,D), (A,C,B)
+    if flip {
+      output.indices.extend_from_slice(&[
+        v_a as u32, v_b as u32, v_c as u32, v_a as u32, v_d as u32, v_b as u32,
+      ]);
     } else {
-      // Split along C-D diagonal
-      if flip {
-        output.indices.extend_from_slice(&[
-          v_c as u32, v_d as u32, v_b as u32, v_c as u32, v_a as u32, v_d as u32,
-        ]);
-      } else {
-        output.indices.extend_from_slice(&[
-          v_c as u32, v_b as u32, v_d as u32, v_c as u32, v_d as u32, v_a as u32,
-        ]);
-      }
+      output.indices.extend_from_slice(&[
+        v_a as u32, v_b as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32,
+      ]);
     }
   }
-}
-
-/// Squared distance between two points.
-#[inline(always)]
-fn dist_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
-  let dx = a[0] - b[0];
-  let dy = a[1] - b[1];
-  let dz = a[2] - b[2];
-  dx * dx + dy * dy + dz * dz
 }
 
 #[cfg(test)]

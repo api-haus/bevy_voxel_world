@@ -25,9 +25,7 @@ pub enum NormalMode {
 
 impl Default for NormalMode {
   fn default() -> Self {
-    NormalMode::Blended {
-      blend_distance: 2.0,
-    }
+    NormalMode::Gradient
   }
 }
 

@@ -1,66 +1,67 @@
-//! FastNoise2-based terrain generation implementing VolumeSampler.
+//! FastNoise2-based 3D volume sampler implementing VolumeSampler.
 
 use super::{presets, NoiseNode};
 use crate::constants::{SAMPLE_SIZE, SAMPLE_SIZE_CB};
 use crate::pipeline::VolumeSampler;
 use crate::types::{sdf_conversion, MaterialId, SdfSample};
 
-/// Terrain sampler using FastNoise2 encoded node trees.
+/// Volume sampler using a single FastNoise2 encoded node tree.
 ///
-/// Uses 2D heightmap noise combined with 3D cave noise to generate
-/// terrain SDF values. Works identically on native and WASM through
-/// the unified NoiseNode API.
+/// Samples a 3D noise graph directly as SDF values. The noise output
+/// is scaled and offset to produce the final SDF. Works identically
+/// on native and WASM through the unified NoiseNode API.
 #[derive(Clone)]
 pub struct FastNoise2Terrain {
-  terrain_encoded: &'static str,
-  cave_encoded: &'static str,
-  pub terrain_amplitude: f32,
-  pub terrain_base_height: f32,
-  pub cave_threshold: f32,
+  encoded: &'static str,
+  /// Multiplier for noise output (scales SDF range)
+  pub scale: f32,
+  /// Offset added to scaled noise (shifts the surface)
+  pub offset: f32,
+  /// Frequency multiplier for noise sampling (default: 1.0)
+  /// Smaller = larger terrain features
+  pub frequency: f32,
   pub seed: i32,
 }
 
 impl FastNoise2Terrain {
-  /// Create a new terrain sampler with default presets.
+  /// Create a new volume sampler with default preset.
   pub fn new(seed: i32) -> Self {
     Self {
-      terrain_encoded: presets::SIMPLE_TERRAIN,
-      cave_encoded: presets::SIMPLE_TERRAIN,
-      terrain_amplitude: 50.0,
-      terrain_base_height: 0.0,
-      cave_threshold: 0.3,
+      encoded: presets::SIMPLE_TERRAIN,
+      scale: 1.0,
+      offset: 0.0,
+      frequency: 1.0,
       seed,
     }
   }
 
-  /// Create a terrain sampler with custom encoded noise graphs.
+  /// Create a volume sampler with a custom encoded noise graph.
   ///
   /// Encoded strings can be exported from FastNoise2's NoiseTool application.
-  pub fn with_encoded(
-    terrain_encoded: &'static str,
-    cave_encoded: &'static str,
-    seed: i32,
-  ) -> Self {
+  pub fn with_encoded(encoded: &'static str, seed: i32) -> Self {
     Self {
-      terrain_encoded,
-      cave_encoded,
-      terrain_amplitude: 50.0,
-      terrain_base_height: 0.0,
-      cave_threshold: 0.3,
+      encoded,
+      scale: 1.0,
+      offset: 0.0,
+      frequency: 1.0,
       seed,
     }
   }
 
-  /// Set terrain height parameters.
-  pub fn with_terrain(mut self, amplitude: f32, base_height: f32) -> Self {
-    self.terrain_amplitude = amplitude;
-    self.terrain_base_height = base_height;
+  /// Set scale and offset for noise-to-SDF conversion.
+  ///
+  /// `sdf = noise * scale + offset`
+  pub fn with_scale_offset(mut self, scale: f32, offset: f32) -> Self {
+    self.scale = scale;
+    self.offset = offset;
     self
   }
 
-  /// Set cave carving threshold.
-  pub fn with_cave_threshold(mut self, threshold: f32) -> Self {
-    self.cave_threshold = threshold;
+  /// Set frequency multiplier for noise sampling.
+  ///
+  /// Smaller values = larger terrain features.
+  pub fn with_frequency(mut self, frequency: f32) -> Self {
+    self.frequency = frequency;
     self
   }
 }
@@ -68,76 +69,56 @@ impl FastNoise2Terrain {
 impl VolumeSampler for FastNoise2Terrain {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
     const SIZE: usize = SAMPLE_SIZE;
-    let vs = voxel_size as f32;
-    let start_x = sample_start[0] as f32;
-    let start_y = sample_start[1] as f32;
-    let start_z = sample_start[2] as f32;
-    let step = vs;
 
-    // Create noise nodes (uses native FFI or WASM JS bridge automatically)
-    let terrain_node =
-      NoiseNode::from_encoded(self.terrain_encoded).expect("Invalid terrain encoded node tree");
-    let cave_node =
-      NoiseNode::from_encoded(self.cave_encoded).expect("Invalid cave encoded node tree");
+    // Convert grid_offset to world position, then scale by frequency
+    // frequency controls terrain feature size: smaller = larger features
+    let world_x = (grid_offset[0] as f64 * voxel_size) as f32 * self.frequency;
+    let world_y = (grid_offset[1] as f64 * voxel_size) as f32 * self.frequency;
+    let world_z = (grid_offset[2] as f64 * voxel_size) as f32 * self.frequency;
+    // Step must scale with voxel_size for chunk boundary coherency
+    let step = voxel_size as f32 * self.frequency;
 
-    // Generate 2D heightmap
-    let mut heightmap = vec![0.0f32; SIZE * SIZE];
-    terrain_node.gen_uniform_grid_2d(
-      &mut heightmap,
-      start_x,
-      start_z,
+    // Create noise node from encoded preset
+    let node = NoiseNode::from_encoded(self.encoded).expect("Invalid encoded node tree");
+
+    // Generate 3D noise directly using fork's float offset API
+    let mut noise = vec![0.0f32; SAMPLE_SIZE_CB];
+    node.gen_uniform_grid_3d(
+      &mut noise,
+      world_x,
+      world_y,
+      world_z,
       SIZE as i32,
       SIZE as i32,
+      SIZE as i32,
+      step,
       step,
       step,
       self.seed,
     );
 
-    // Generate 3D cave noise
-    let mut cave_noise = vec![0.0f32; SAMPLE_SIZE_CB];
-    cave_node.gen_uniform_grid_3d(
-      &mut cave_noise,
-      start_x,
-      start_y,
-      start_z,
-      SIZE as i32,
-      SIZE as i32,
-      SIZE as i32,
-      step,
-      step,
-      step,
-      self.seed + 1000,
-    );
-
-    // Combine terrain heightmap and cave noise into SDF
-    for idx in 0..SAMPLE_SIZE_CB {
-      let x = idx / (SIZE * SIZE);
-      let yz = idx % (SIZE * SIZE);
+    // Convert noise to SDF with scale and offset
+    // CRITICAL: Remap axis ordering from FastNoise2 to volume layout
+    // FastNoise2 outputs X-fastest: fn_idx = z * SIZE² + y * SIZE + x
+    // Volume uses X-slowest: vol_idx = x * SIZE² + y * SIZE + z
+    for vol_idx in 0..SAMPLE_SIZE_CB {
+      let x = vol_idx / (SIZE * SIZE);
+      let yz = vol_idx % (SIZE * SIZE);
       let y = yz / SIZE;
       let z = yz % SIZE;
 
-      // 2D heightmap lookup (x, z coordinates)
-      let h_idx = z * SIZE + x;
-      let world_y = start_y + y as f32 * vs;
-      let height = self.terrain_base_height + heightmap[h_idx] * self.terrain_amplitude;
+      // FastNoise2 index: X-fastest layout
+      let fn_idx = z * SIZE * SIZE + y * SIZE + x;
 
-      // Terrain SDF: positive above surface, negative below
-      let terrain_sdf = world_y - height;
-
-      // Cave SDF: carve out where noise exceeds threshold
-      let cave_sdf = cave_noise[idx] - self.cave_threshold;
-
-      // Union via max: air where either terrain or cave is air
-      let final_sdf = terrain_sdf.max(cave_sdf);
-
-      volume[idx] = sdf_conversion::to_storage(final_sdf);
-      materials[idx] = 0;
+      let sdf = noise[fn_idx] * self.scale + self.offset;
+      volume[vol_idx] = sdf_conversion::to_storage(sdf);
+      materials[vol_idx] = 0;
     }
   }
 }

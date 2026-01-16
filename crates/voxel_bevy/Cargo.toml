@@ -8,6 +8,7 @@ voxel_plugin = { path = "../voxel_plugin" }
 bevy = { workspace = true }
 rayon = { workspace = true }
 smallvec = "1.13"
+bevy_enhanced_input = "0.22"
 
 # Noise is now in voxel_plugin which handles native/wasm automatically
 

@@ -27,9 +27,10 @@ use std::collections::HashSet;
 use rayon::prelude::*;
 
 use super::composition::compose;
+use super::presample::sample_volume_for_node;
 use super::presentation::present;
-use super::types::{ReadyChunk, SampledVolume, VolumeSampler, WorkSource};
-use crate::constants::SAMPLE_SIZE_CB;
+use super::types::{ReadyChunk, VolumeSampler, WorkSource};
+use crate::noise::is_homogeneous;
 use crate::octree::{OctreeConfig, OctreeNode, TransitionGroup, TransitionType};
 use crate::types::MeshConfig;
 use crate::world::WorldId;
@@ -77,38 +78,9 @@ fn compute_neighbor_mask(
   mask
 }
 
-/// Check if volume is homogeneous (all samples have same sign).
-#[inline]
-fn is_homogeneous(volume: &[i8; SAMPLE_SIZE_CB]) -> bool {
-  let first_sign = volume[0] < 0;
-  volume.iter().all(|&v| (v < 0) == first_sign)
-}
-
-/// Presample a single node, returning volume if surface exists.
-fn presample_node<S: VolumeSampler>(
-  node: OctreeNode,
-  sampler: &S,
-  config: &OctreeConfig,
-) -> Option<SampledVolume> {
-  let mut volume = Box::new([0i8; SAMPLE_SIZE_CB]);
-  let mut materials = Box::new([0u8; SAMPLE_SIZE_CB]);
-
-  let node_min = config.get_node_min(&node);
-  let voxel_size = config.get_voxel_size(node.lod);
-
-  sampler.sample_volume(
-    [node_min.x, node_min.y, node_min.z],
-    voxel_size,
-    &mut volume,
-    &mut materials,
-  );
-
-  if is_homogeneous(&volume) {
-    None
-  } else {
-    Some(SampledVolume { volume, materials })
-  }
-}
+// Note: is_homogeneous and sample_volume_for_node are imported from their
+// canonical locations (noise module and presample module respectively)
+// to avoid code duplication.
 
 /// Process transition groups through the full pipeline.
 ///
@@ -154,8 +126,13 @@ pub fn process_transitions<S: VolumeSampler>(
   let mesh_results: Vec<_> = nodes_to_mesh
     .into_par_iter()
     .filter_map(|node| {
-      // Presample
-      let sampled = presample_node(node, sampler, config)?;
+      // Presample using centralized helper
+      let sampled = sample_volume_for_node(&node, sampler, config);
+
+      // Skip homogeneous volumes (all solid or all air)
+      if is_homogeneous(&sampled.volume) {
+        return None;
+      }
 
       // Compute neighbor mask for seam handling
       let neighbor_mask = compute_neighbor_mask(&node, leaves, config);
@@ -225,6 +202,7 @@ pub struct ProcessingStats {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::constants::SAMPLE_SIZE_CB;
   use crate::octree::OctreeNode;
 
   struct TestSampler;
@@ -232,7 +210,7 @@ mod tests {
   impl VolumeSampler for TestSampler {
     fn sample_volume(
       &self,
-      _sample_start: [f64; 3],
+      _grid_offset: [i64; 3],
       _voxel_size: f64,
       volume: &mut [i8; SAMPLE_SIZE_CB],
       materials: &mut [u8; SAMPLE_SIZE_CB],

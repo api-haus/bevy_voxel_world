@@ -133,7 +133,7 @@ mod tests {
   impl VolumeSampler for MockSampler {
     fn sample_volume(
       &self,
-      _sample_start: [f64; 3],
+      _grid_offset: [i64; 3],
       _voxel_size: f64,
       volume: &mut [SdfSample; SAMPLE_SIZE_CB],
       materials: &mut [MaterialId; SAMPLE_SIZE_CB],

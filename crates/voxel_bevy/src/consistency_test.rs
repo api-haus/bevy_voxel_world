@@ -26,7 +26,6 @@
 //! - Preventing refinement while async is in-flight (current partial solution)
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bevy::app::{App, Update};
@@ -39,7 +38,6 @@ use voxel_plugin::octree::{
   TransitionType,
 };
 use voxel_plugin::pipeline::AsyncPipeline;
-use voxel_plugin::threading::TaskExecutor;
 use voxel_plugin::world::WorldId;
 
 use crate::components::VoxelChunk;
@@ -406,7 +404,7 @@ impl TestWorld {
       config,
       sampler,
       leaves,
-      pipeline: AsyncPipeline::with_executor(Arc::new(TaskExecutor::default_threads())),
+      pipeline: AsyncPipeline::new(),
       pending: None,
       frames_since_check: 0,
     }
@@ -549,8 +547,10 @@ fn poll_refinement_system(
   mut validator: ResMut<ConsistencyValidator>,
   frame_counter: Res<TestFrameCounter>,
 ) {
+  use voxel_plugin::pipeline::PipelineEvent;
+
   // Poll for completion
-  let Some(ready_chunks) = test_world.pipeline.poll() else {
+  let Some(events) = test_world.pipeline.poll_events() else {
     return;
   };
 
@@ -558,30 +558,40 @@ fn poll_refinement_system(
     return;
   };
 
-  // Despawn old entities
-  for node in &pending.nodes_to_remove {
-    if let Some(entity) = entity_map.node_to_entity.remove(node) {
-      commands.entity(entity).despawn();
+  for event in events {
+    match event {
+      PipelineEvent::NodesExpired { nodes, .. } => {
+        // Despawn old entities
+        for node in &nodes {
+          if let Some(entity) = entity_map.node_to_entity.remove(node) {
+            commands.entity(entity).despawn();
+          }
+        }
+        validator.on_entities_despawned(&nodes);
+      }
+      PipelineEvent::ChunksReady { world_id, chunks } => {
+        // Spawn new entities (we just track nodes, not actual meshes)
+        let spawned_nodes: Vec<OctreeNode> = chunks.iter().map(|c| c.node).collect();
+
+        // Notify validator BEFORE adding to map
+        validator.on_entities_spawned(frame_counter.frame, &test_world.leaves, &spawned_nodes);
+
+        for node in &spawned_nodes {
+          // Spawn a minimal entity to track
+          let entity = commands
+            .spawn(VoxelChunk {
+              node: *node,
+              world_id,
+            })
+            .id();
+          entity_map.node_to_entity.insert(*node, entity);
+        }
+      }
     }
   }
-  validator.on_entities_despawned(&pending.nodes_to_remove);
 
-  // Spawn new entities (we just track nodes, not actual meshes)
-  let spawned_nodes: Vec<OctreeNode> = ready_chunks.iter().map(|c| c.node).collect();
-
-  // Notify validator BEFORE adding to map
-  validator.on_entities_spawned(frame_counter.frame, &test_world.leaves, &spawned_nodes);
-
-  for node in &spawned_nodes {
-    // Spawn a minimal entity to track
-    let entity = commands
-      .spawn(VoxelChunk {
-        node: *node,
-        world_id: pending.world_id,
-      })
-      .id();
-    entity_map.node_to_entity.insert(*node, entity);
-  }
+  // Clear pending state (nodes_to_remove already handled via events)
+  let _ = pending;
 }
 
 /// System to validate consistency each frame.

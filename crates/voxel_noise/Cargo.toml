@@ -13,7 +13,7 @@ name = "voxel_noise"
 path = "src/wasm_main.rs"
 
 [dependencies]
-fastnoise2 = { git = "https://github.com/api-haus/fastnoise2-rs", branch = "main" }
+fastnoise2 = { git = "https://github.com/api-haus/fastnoise2-rs", branch = "main", features = ["build-from-source"] }
 
 [features]
 default = []

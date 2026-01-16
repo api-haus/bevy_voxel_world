@@ -201,3 +201,4 @@ fn test_normal_modes_produce_different_results() {
     "Gradient and Geometry should produce different normals"
   );
 }
+

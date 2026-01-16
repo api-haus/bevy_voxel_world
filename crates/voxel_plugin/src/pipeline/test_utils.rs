@@ -45,17 +45,21 @@ impl SphereSampler {
 impl VolumeSampler for SphereSampler {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    let start = DVec3::from_array(sample_start);
     for x in 0..SAMPLE_SIZE {
       for y in 0..SAMPLE_SIZE {
         for z in 0..SAMPLE_SIZE {
           let idx = x * SAMPLE_SIZE * SAMPLE_SIZE + y * SAMPLE_SIZE + z;
-          let world_pos = start + DVec3::new(x as f64, y as f64, z as f64) * voxel_size;
+          // world_pos = (grid_offset + sample_index) * voxel_size
+          let world_pos = DVec3::new(
+            (grid_offset[0] + x as i64) as f64 * voxel_size,
+            (grid_offset[1] + y as i64) as f64 * voxel_size,
+            (grid_offset[2] + z as i64) as f64 * voxel_size,
+          );
           volume[idx] = self.sample_point(world_pos);
           materials[idx] = 0;
         }
@@ -98,7 +102,7 @@ impl ConstantSampler {
 impl VolumeSampler for ConstantSampler {
   fn sample_volume(
     &self,
-    _sample_start: [f64; 3],
+    _grid_offset: [i64; 3],
     _voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
@@ -137,17 +141,20 @@ impl PlaneSampler {
 impl VolumeSampler for PlaneSampler {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    let start = DVec3::from_array(sample_start);
     for x in 0..SAMPLE_SIZE {
       for y in 0..SAMPLE_SIZE {
         for z in 0..SAMPLE_SIZE {
           let idx = x * SAMPLE_SIZE * SAMPLE_SIZE + y * SAMPLE_SIZE + z;
-          let world_pos = start + DVec3::new(x as f64, y as f64, z as f64) * voxel_size;
+          let world_pos = DVec3::new(
+            (grid_offset[0] + x as i64) as f64 * voxel_size,
+            (grid_offset[1] + y as i64) as f64 * voxel_size,
+            (grid_offset[2] + z as i64) as f64 * voxel_size,
+          );
           volume[idx] = self.sample_point(world_pos);
           materials[idx] = 0;
         }
@@ -251,17 +258,20 @@ impl CornerSampler {
 impl VolumeSampler for CornerSampler {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    let start = DVec3::from_array(sample_start);
     for x in 0..SAMPLE_SIZE {
       for y in 0..SAMPLE_SIZE {
         for z in 0..SAMPLE_SIZE {
           let idx = x * SAMPLE_SIZE * SAMPLE_SIZE + y * SAMPLE_SIZE + z;
-          let world_pos = start + DVec3::new(x as f64, y as f64, z as f64) * voxel_size;
+          let world_pos = DVec3::new(
+            (grid_offset[0] + x as i64) as f64 * voxel_size,
+            (grid_offset[1] + y as i64) as f64 * voxel_size,
+            (grid_offset[2] + z as i64) as f64 * voxel_size,
+          );
           volume[idx] = self.sample_point(world_pos);
           materials[idx] = 0;
         }
@@ -298,7 +308,7 @@ impl<S: VolumeSampler> CountingSampler<S> {
 impl<S: VolumeSampler> VolumeSampler for CountingSampler<S> {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
@@ -306,7 +316,7 @@ impl<S: VolumeSampler> VolumeSampler for CountingSampler<S> {
     self.sample_count.fetch_add(1, Ordering::SeqCst);
     self
       .inner
-      .sample_volume(sample_start, voxel_size, volume, materials)
+      .sample_volume(grid_offset, voxel_size, volume, materials)
   }
 }
 

@@ -31,7 +31,24 @@ pub fn spawn_chunk_entity(
 
   let world_min = config.get_node_min(&node);
   let voxel_size = config.get_voxel_size(node.lod) as f32;
+  let cell_size = config.get_cell_size(node.lod);
 
+  // Debug: log chunk positioning for chunks near origin at any LOD
+  if node.x.abs() <= 1 && node.y.abs() <= 1 && node.z.abs() <= 1 {
+    info!(
+      "Chunk node=({},{},{}) LOD{}: world_min=({:.1}, {:.1}, {:.1}), voxel_size={:.1}, cell_size={:.1}, mesh_bounds_x=[{:.1}, {:.1}]",
+      node.x, node.y, node.z, node.lod,
+      world_min.x, world_min.y, world_min.z,
+      voxel_size,
+      cell_size,
+      output.bounds.min[0],
+      output.bounds.max[0]
+    );
+  }
+
+  // Transform position = node_min (matches C# OctreeTransform.GetWorldPosition)
+  // Mesh vertices are in local [0, ~31] coords, scaled by voxel_size via transform.
+  // No offset needed - sample 0 is at node_min, mesh vertex 0 should appear at node_min.
   let entity = commands
     .spawn((
       Mesh3d(mesh_handle),

@@ -7,18 +7,19 @@ use rayon::prelude::*;
 
 use super::types::{PresampleOutput, SampledVolume, VolumeSampler, WorkSource};
 use crate::constants::SAMPLE_SIZE_CB;
+use crate::noise::is_homogeneous;
 use crate::octree::{OctreeConfig, OctreeNode};
-use crate::types::SdfSample;
-
-/// Check if volume is homogeneous (all samples have same sign).
-#[inline]
-fn is_homogeneous(volume: &[SdfSample; SAMPLE_SIZE_CB]) -> bool {
-  let first_sign = volume[0] < 0;
-  volume.iter().all(|&v| (v < 0) == first_sign)
-}
 
 /// Sample the full 32³ volume for a node using VolumeSampler.
-fn sample_volume<S: VolumeSampler>(
+///
+/// Uses integer grid coordinates for precision at chunk boundaries.
+/// Matches C# FastNoise2Sampler approach:
+/// - grid_offset = round(node_min / voxel_size)
+/// - Sample N world position = (grid_offset + N) * voxel_size
+///
+/// This ensures adjacent chunks use identical integer offsets for
+/// overlapping samples, eliminating floating-point precision divergence.
+pub fn sample_volume_for_node<S: VolumeSampler + ?Sized>(
   node: &OctreeNode,
   sampler: &S,
   config: &OctreeConfig,
@@ -29,13 +30,15 @@ fn sample_volume<S: VolumeSampler>(
   let node_min = config.get_node_min(node);
   let voxel_size = config.get_voxel_size(node.lod);
 
-  // Call the volume sampler with sample_start and voxel_size
-  sampler.sample_volume(
-    [node_min.x, node_min.y, node_min.z],
-    voxel_size,
-    &mut volume,
-    &mut materials,
-  );
+  // Convert to integer grid coordinates to avoid floating-point precision issues.
+  // This matches C# FastNoise2Sampler: gridStart = (int3)round(worldMin / voxelSize)
+  let grid_offset = [
+    (node_min.x / voxel_size).round() as i64,
+    (node_min.y / voxel_size).round() as i64,
+    (node_min.z / voxel_size).round() as i64,
+  ];
+
+  sampler.sample_volume(grid_offset, voxel_size, &mut volume, &mut materials);
 
   SampledVolume { volume, materials }
 }
@@ -49,7 +52,7 @@ pub fn presample_node<S: VolumeSampler>(
   sampler: &S,
   config: &OctreeConfig,
 ) -> PresampleOutput {
-  let sampled = sample_volume(&node, sampler, config);
+  let sampled = sample_volume_for_node(&node, sampler, config);
 
   let volume = if is_homogeneous(&sampled.volume) {
     None

@@ -129,14 +129,16 @@ pub struct PresampleOutput {
 /// Volume-based sampler trait for SIMD-efficient batch sampling.
 ///
 /// Always samples 32x32x32 volumes in one call, enabling SIMD optimization.
-/// Inspired by FastNoise2's `fnGenUniformGrid3D` API with simplified
-/// parameters.
+/// Inspired by FastNoise2's `fnGenUniformGrid3D` API with integer grid
+/// coordinates for precision at chunk boundaries.
 pub trait VolumeSampler: Send + Sync {
   /// Sample a 32x32x32 SDF volume.
   ///
   /// # Parameters
-  /// - `sample_start`: World-space origin of the volume (position of first
-  ///   sample)
+  /// - `grid_offset`: Integer grid coordinates of the volume origin.
+  ///   Computed as `round(world_min / voxel_size)` by the caller.
+  ///   Using integers eliminates floating-point precision issues at
+  ///   chunk boundaries.
   /// - `voxel_size`: Distance between adjacent samples in world units
   /// - `volume`: Output buffer for SDF values (32³ = 32,768 i8 values)
   /// - `materials`: Output buffer for material IDs (32³ = 32,768 u8 values)
@@ -146,10 +148,10 @@ pub trait VolumeSampler: Send + Sync {
   ///
   /// # World Position
   /// Sample at grid position (x, y, z) corresponds to world position:
-  /// `world_pos = sample_start + [x, y, z] * voxel_size`
+  /// `world_pos = (grid_offset + [x, y, z]) * voxel_size`
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
@@ -160,12 +162,12 @@ pub trait VolumeSampler: Send + Sync {
 impl VolumeSampler for Box<dyn VolumeSampler> {
   fn sample_volume(
     &self,
-    sample_start: [f64; 3],
+    grid_offset: [i64; 3],
     voxel_size: f64,
     volume: &mut [SdfSample; SAMPLE_SIZE_CB],
     materials: &mut [MaterialId; SAMPLE_SIZE_CB],
   ) {
-    (**self).sample_volume(sample_start, voxel_size, volume, materials)
+    (**self).sample_volume(grid_offset, voxel_size, volume, materials)
   }
 }
 

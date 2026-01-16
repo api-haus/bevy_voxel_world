@@ -20,24 +20,23 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 use voxel_bevy::components::{VoxelChunk, VoxelViewer};
 use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
+use voxel_bevy::input::{fly_camera_input_bundle, CameraInputContext};
 use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
 use voxel_bevy::resources::{ChunkEntityMap, LodMaterials};
 use voxel_bevy::systems::entities::spawn_chunk_entity;
 use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
-use voxel_plugin::constants::SAMPLE_SIZE_CB;
 use voxel_plugin::octree::{
   refine, OctreeConfig, OctreeNode, RefinementBudget, RefinementInput, TransitionGroup,
   TransitionType,
 };
-use voxel_plugin::pipeline::{AsyncPipeline, PipelineEvent};
+use voxel_plugin::pipeline::{sample_volume_for_node, AsyncPipeline, PipelineEvent};
 use voxel_plugin::surface_nets;
-use voxel_plugin::threading::TaskExecutor;
 use voxel_plugin::types::MeshConfig;
 
 use super::{Scene, SceneEntity};
 
-/// Re-use glam DVec3 from bevy
+/// Re-use DVec3 from bevy
 type DVec3 = bevy::math::DVec3;
 
 /// Initial LOD for octree (coarse starting point, will refine from here).
@@ -80,15 +79,15 @@ impl Plugin for NoiseLodPlugin {
   }
 }
 
-/// Remove FlyCamera and VoxelViewer components from main camera when leaving
-/// scene
+/// Remove FlyCamera, VoxelViewer, and input components from main camera when leaving scene
 fn cleanup_camera(mut commands: Commands, camera_query: Query<Entity, With<crate::MainCamera>>) {
-  if let Ok(camera_entity) = camera_query.single() {
-    commands
-      .entity(camera_entity)
-      .remove::<FlyCamera>()
-      .remove::<VoxelViewer>();
-  }
+	if let Ok(camera_entity) = camera_query.single() {
+		commands
+			.entity(camera_entity)
+			.remove::<FlyCamera>()
+			.remove::<VoxelViewer>()
+			.remove::<CameraInputContext>();
+	}
 }
 
 /// Sampler source selection.
@@ -147,7 +146,7 @@ struct AsyncRefinementState {
 impl Default for AsyncRefinementState {
   fn default() -> Self {
     Self {
-      pipeline: AsyncPipeline::with_executor(Arc::new(TaskExecutor::default_threads())),
+      pipeline: AsyncPipeline::new(),
       continuous: false,
       frames_since_check: 0,
     }
@@ -196,7 +195,7 @@ fn setup(
 
   // 2. Create octree configuration
   let config = OctreeConfig {
-    voxel_size: 1.0,
+    voxel_size: 0.25,
     world_origin: DVec3::new(-500.0, -100.0, -500.0),
     min_lod: 0,
     max_lod: 6,
@@ -368,15 +367,28 @@ fn setup_camera_and_lights(
   camera_query: &Query<Entity, With<crate::MainCamera>>,
 ) {
   // Configure existing main camera with FlyCamera and VoxelViewer
+  // Position camera above terrain (world_origin is at -500, -100, -500)
   if let Ok(camera_entity) = camera_query.single() {
+    // Position camera above terrain center, looking down at slight angle
+    // Terrain is at world_origin (-500, -100, -500), extends ~336 units per axis at LOD 4
+    let camera_pos = Vec3::new(-500.0, 200.0, -300.0);
+    let look_target = Vec3::new(-500.0, 0.0, -500.0);
+
+    // Calculate initial yaw/pitch from direction to target
+    let dir = (look_target - camera_pos).normalize();
+    let yaw = (-dir.x).atan2(-dir.z); // Yaw: angle in XZ plane
+    let pitch = (-dir.y).asin(); // Pitch: angle from horizontal
+
     commands.entity(camera_entity).insert((
-      Transform::from_translation(Vec3::new(0.0, 100.0, 100.0)).looking_at(Vec3::ZERO, Vec3::Y),
-      FlyCamera {
+      Transform::from_translation(camera_pos)
+        .with_rotation(Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)),
+      fly_camera_input_bundle(FlyCamera {
         speed: 100.0,
-        sensitivity: 0.003,
-        yaw: 0.0,
-        pitch: -0.3,
-      },
+        mouse_sensitivity: 0.003,
+        gamepad_sensitivity: 2.0,
+        yaw,
+        pitch,
+      }),
       VoxelViewer,
     ));
   }
@@ -393,7 +405,7 @@ fn setup_camera_and_lights(
   ));
 
   // Ambient light
-  commands.insert_resource(AmbientLight {
+  commands.insert_resource(GlobalAmbientLight {
     color: Color::srgb(0.6, 0.7, 0.8),
     brightness: 200.0,
     affects_lightmapped_meshes: false,
@@ -598,29 +610,21 @@ fn rebuild_world(
   let chunk_meshes: Vec<_> = leaf_nodes
     .par_iter()
     .filter_map(|node| {
-      let mut volume = Box::new([0i8; SAMPLE_SIZE_CB]);
-      let mut mats = Box::new([0u8; SAMPLE_SIZE_CB]);
+      // Use centralized sampling helper (handles apron offset)
+      let sampled = sample_volume_for_node(node, sampler.as_ref(), &config);
 
-      let node_min = config.get_node_min(node);
-      let voxel_size = config.get_voxel_size(node.lod);
-      sampler.sample_volume(
-        [node_min.x, node_min.y, node_min.z],
-        voxel_size,
-        &mut volume,
-        &mut mats,
-      );
-
-      if is_homogeneous(&volume) {
+      if is_homogeneous(&sampled.volume) {
         return None;
       }
 
       let neighbor_mask = compute_neighbor_mask(node, &world_root.world.leaves, &config);
+      let voxel_size = config.get_voxel_size(node.lod);
 
       let mesh_config = MeshConfig::default()
         .with_voxel_size(voxel_size as f32)
         .with_neighbor_mask(neighbor_mask);
 
-      let output = surface_nets::generate(&volume, &mats, &mesh_config);
+      let output = surface_nets::generate(&sampled.volume, &sampled.materials, &mesh_config);
 
       if output.is_empty() {
         return None;
@@ -766,6 +770,8 @@ fn poll_async_refinement(
     return;
   };
 
+  info!("[Poll] Received {} events from pipeline", events.len());
+
   let Some(lod_materials) = lod_materials else {
     warn!("LodMaterials not available");
     return;
@@ -802,6 +808,12 @@ fn poll_async_refinement(
         }
       }
       PipelineEvent::ChunksReady { world_id, chunks: ready_chunks } => {
+        info!(
+          "[Poll] ChunksReady: {} chunks for world {:?}",
+          ready_chunks.len(),
+          world_id
+        );
+
         // Spawn new chunks - only spawn if node is still in world.leaves
         // This guards against stale ready_chunks from async timing gaps
         let mut local_chunk_map = ChunkEntityMap::default();
@@ -812,12 +824,14 @@ fn poll_async_refinement(
         };
 
         let mut skipped = 0;
+        let mut spawned = 0;
         for ready in ready_chunks {
           // Guard: only spawn if node is still a leaf (prevents orphan entities)
           if !world_root.world.leaves.contains(&ready.node) {
             skipped += 1;
             continue;
           }
+          spawned += 1;
 
           spawn_chunk_entity_with_marker(
             &mut commands,
@@ -832,6 +846,7 @@ fn poll_async_refinement(
           );
         }
 
+        info!("[Poll] Spawned {} chunks, skipped {}", spawned, skipped);
         if skipped > 0 {
           warn!(
             "[Refine] Skipped {} stale nodes (no longer leaves)",
