@@ -277,7 +277,18 @@ pub fn generate(
   }
 
   // =========================================================================
-  // Pass 2: Normals
+  // Pass 2: Boundary Triangle Filter
+  // =========================================================================
+  // Remove triangles where ALL vertices are in the overlap region.
+  // This prevents Z-fighting at chunk boundaries while keeping all valid geometry.
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("boundary_filter_pass").entered();
+    filter_boundary_triangles(&mut output);
+  }
+
+  // =========================================================================
+  // Pass 3: Normals
   // =========================================================================
   {
     #[cfg(feature = "tracing")]
@@ -286,6 +297,59 @@ pub fn generate(
   }
 
   output
+}
+
+/// Filter out triangles where ALL vertices are in the overlap region.
+///
+/// Z-fighting prevention via post-process triangle filtering:
+/// - Vertices in the overlap region (cell position > LAST_INTERIOR_CELL on any axis)
+///   are considered "outside"
+/// - Triangles are kept if at least one vertex is "inside" (in the interior region)
+/// - Triangles are discarded only if ALL three vertices are "outside"
+///
+/// Interior region: cells [0, LAST_INTERIOR_CELL] = [0, 28]
+/// Overlap region: cells > LAST_INTERIOR_CELL = [29, 30, ...]
+///
+/// This is more permissive than per-emission filtering and handles edge cases
+/// where triangles straddle the boundary.
+fn filter_boundary_triangles(output: &mut MeshOutput) {
+  let vertices = &output.vertices;
+  let last_interior = LAST_INTERIOR_CELL as i32;
+
+  // Check if a vertex is in the overlap region (outside interior)
+  // A vertex is "outside" if ANY of its cell coordinates exceed LAST_INTERIOR_CELL
+  let is_outside = |cell_pos: [i32; 3]| -> bool {
+    cell_pos[0] > last_interior || cell_pos[1] > last_interior || cell_pos[2] > last_interior
+  };
+
+  // Filter indices: keep triangles where at least one vertex is inside
+  let mut new_indices = Vec::with_capacity(output.indices.len());
+
+  for triangle in output.indices.chunks(3) {
+    if triangle.len() != 3 {
+      continue;
+    }
+
+    let idx_a = triangle[0] as usize;
+    let idx_b = triangle[1] as usize;
+    let idx_c = triangle[2] as usize;
+
+    // Bounds check
+    if idx_a >= vertices.len() || idx_b >= vertices.len() || idx_c >= vertices.len() {
+      continue;
+    }
+
+    let a_outside = is_outside(vertices[idx_a].cell_position);
+    let b_outside = is_outside(vertices[idx_b].cell_position);
+    let c_outside = is_outside(vertices[idx_c].cell_position);
+
+    // Keep triangle if at least one vertex is inside
+    if !(a_outside && b_outside && c_outside) {
+      new_indices.extend_from_slice(triangle);
+    }
+  }
+
+  output.indices = new_indices;
 }
 
 /// Compute normals for all vertices based on the configured mode.
@@ -446,6 +510,10 @@ fn process_cell_geometry(
 ///
 /// Uses shorter diagonal optimization: splits quads along the shorter diagonal
 /// to produce better quality triangles with less degenerate cases.
+///
+/// Note: Triangles are emitted liberally here. Z-fighting prevention is handled
+/// by post-processing in `filter_boundary_triangles()` which removes triangles
+/// where ALL vertices are in the overlap region.
 fn emit_triangles(
   pos: [usize; 3],
   edge_mask: u16,
@@ -468,8 +536,8 @@ fn emit_triangles(
     let u = (axis + 1) % 3;
     let v = (axis + 2) % 3;
 
-    // Skip boundary positions to prevent duplicate quads.
-    // Matches C# NaiveSurfaceNets: only check perpendicular axes at 0.
+    // Skip boundary positions to prevent out-of-bounds vertex lookups.
+    // We look backwards in u and v directions, so pos[u]-1 and pos[v]-1 must be valid.
     let pos_arr = [x, y, z];
     if pos_arr[u] == 0 || pos_arr[v] == 0 {
       continue;

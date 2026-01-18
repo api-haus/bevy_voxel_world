@@ -79,45 +79,51 @@ World positions:        0   1   ...  27  28  29  30  31  32  33  ...
 - **Cells 1-28**: Create vertices AND emit triangles (interior)
 - **Cells 29-30**: Create vertices (for LOD displacement), but do NOT emit triangles
 
-The boundary check in surface nets:
+### Boundary Handling (Post-Process Triangle Filter)
+
+Z-fighting prevention uses a **post-process triangle filter** rather than per-emission filtering:
+
+1. **Emit liberally**: During mesh generation, emit all valid triangles
+   (only skip when perpendicular axes are 0 to prevent out-of-bounds lookups)
+
+2. **Filter post-process**: After geometry pass, remove triangles where
+   ALL vertices are in the overlap region (cells > LAST_INTERIOR_CELL)
 
 ```rust
-// CURRENT (WRONG - only checks negative boundary)
-if pos[u] == 0 || pos[v] == 0 {
-  continue;  // Skip negative apron
-}
+// Post-process filter (filter_boundary_triangles)
+let is_outside = |cell_pos: [i32; 3]| -> bool {
+  cell_pos[0] > 28 || cell_pos[1] > 28 || cell_pos[2] > 28
+};
 
-// CORRECT (checks both boundaries)
-if x < FIRST_INTERIOR_CELL || x > LAST_INTERIOR_CELL
-   || y < FIRST_INTERIOR_CELL || y > LAST_INTERIOR_CELL
-   || z < FIRST_INTERIOR_CELL || z > LAST_INTERIOR_CELL {
-  return;  // Cell is not interior - skip ALL triangle emission
+// Keep triangle if at least one vertex is inside
+if !(a_outside && b_outside && c_outside) {
+  keep_triangle();
 }
 ```
 
-### Why Current Implementation Shows Overlap
+This approach:
+- Handles edge cases where triangles straddle boundaries
+- Is more permissive than per-emission filtering
 
-With `voxel_size=16`, `cell_size=448`:
+### How Overlap Is Handled (FIXED)
+
+Adjacent chunks intentionally overlap in world space:
 
 ```
+With voxel_size=16, cell_size=448:
+
 Chunk 0: world_min = -500
          mesh vertices span: -500 + 0*16 to -500 + 31*16 = [-500, -4]
 
 Chunk 1: world_min = -52 (= -500 + 448)
          mesh vertices span: -52 + 0*16 to -52 + 31*16 = [-52, 444]
 
-OVERLAP: [-52, -4] = 48 world units = 3 voxels
+OVERLAP REGION: [-52, -4] = 48 world units = 3 voxels
 ```
 
-This happens because:
-1. Mesh vertices span 32 samples (0-31)
-2. Cell size is only 28 voxels
-3. Triangles are emitted for cells 0-30, not just 1-28
-
-### The Fix
-
-1. Vertices should still be created for ALL cells with surface crossings (0-30)
-2. Triangle emission should be RESTRICTED to interior cells (1-28 on ALL axes)
+**The solution (now implemented):**
+1. Vertices are created for ALL cells with surface crossings (0-30)
+2. Triangle emission is RESTRICTED to interior cells (1-28 on ALL axes)
 3. Cells 0, 29, 30 create vertices but NO triangles
 
 This ensures:
