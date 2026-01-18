@@ -73,7 +73,7 @@ impl VolumeSampler for TiltedPlaneSampler {
           let sdf = (wy - self.height) * cos_a - wx * sin_a;
 
           let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
-          volume[idx] = sdf_conversion::to_storage(sdf as f32);
+          volume[idx] = sdf_conversion::to_storage(sdf as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }
@@ -140,7 +140,7 @@ impl VolumeSampler for SphereSampler {
           let sdf = dist - self.radius;
 
           let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
-          volume[idx] = sdf_conversion::to_storage(sdf as f32);
+          volume[idx] = sdf_conversion::to_storage(sdf as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }
@@ -187,7 +187,7 @@ impl VolumeSampler for GroundPlaneSampler {
           let sdf = wy - self.height;
 
           let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
-          volume[idx] = sdf_conversion::to_storage(sdf as f32);
+          volume[idx] = sdf_conversion::to_storage(sdf as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }
@@ -254,7 +254,7 @@ impl VolumeSampler for BoxSampler {
           let sdf = outside + inside;
 
           let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
-          volume[idx] = sdf_conversion::to_storage(sdf as f32);
+          volume[idx] = sdf_conversion::to_storage(sdf as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }

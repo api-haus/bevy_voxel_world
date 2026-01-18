@@ -11,8 +11,8 @@ fn create_sphere_sdf(radius: f32, center: [f32; 3]) -> [SdfSample; SAMPLE_SIZE_C
         let dz = z as f32 - center[2];
         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
         let sdf = dist - radius;
-        // Use proper SDF scaling for storage
-        volume[coord_to_index(x, y, z)] = sdf_conversion::to_storage(sdf);
+        // Use proper SDF scaling for storage (voxel_size=1.0 for cell-based tests)
+        volume[coord_to_index(x, y, z)] = sdf_conversion::to_storage(sdf, 1.0);
       }
     }
   }

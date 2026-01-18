@@ -236,6 +236,7 @@ impl IndexBuffer {
 /// # Returns
 ///
 /// Mesh output containing vertices, indices, and bounds.
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "surface_nets::generate"))]
 pub fn generate(
   volume: &[SdfSample; SAMPLE_SIZE_CB],
   materials: &[MaterialId; SAMPLE_SIZE_CB],
@@ -250,23 +251,27 @@ pub fn generate(
   // =========================================================================
   // Pass 1: Geometry
   // =========================================================================
-  // Process cells [0, SAMPLE_SIZE-2] (i.e., 0..31 for 32³ samples).
-  // Each cell needs samples at its 8 corners, so the last valid cell index
-  // is SAMPLE_SIZE - 2. The boundary check (pos[u]==0 || pos[v]==0) prevents
-  // duplicate quad generation at chunk boundaries.
-  // Normals are set to placeholder [0, 1, 0].
-  for x in 0..(SAMPLE_SIZE - 1) {
-    for y in 0..(SAMPLE_SIZE - 1) {
-      for z in 0..(SAMPLE_SIZE - 1) {
-        process_cell_geometry(
-          volume,
-          materials,
-          [x, y, z],
-          &mut index_buffer,
-          &mut output,
-          config,
-          transition_bits,
-        );
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("geometry_pass").entered();
+    // Process cells [0, SAMPLE_SIZE-2] (i.e., 0..31 for 32³ samples).
+    // Each cell needs samples at its 8 corners, so the last valid cell index
+    // is SAMPLE_SIZE - 2. The boundary check (pos[u]==0 || pos[v]==0) prevents
+    // duplicate quad generation at chunk boundaries.
+    // Normals are set to placeholder [0, 1, 0].
+    for x in 0..(SAMPLE_SIZE - 1) {
+      for y in 0..(SAMPLE_SIZE - 1) {
+        for z in 0..(SAMPLE_SIZE - 1) {
+          process_cell_geometry(
+            volume,
+            materials,
+            [x, y, z],
+            &mut index_buffer,
+            &mut output,
+            config,
+            transition_bits,
+          );
+        }
       }
     }
   }
@@ -274,7 +279,11 @@ pub fn generate(
   // =========================================================================
   // Pass 2: Normals
   // =========================================================================
-  compute_normals(volume, &mut output, config);
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("normal_pass").entered();
+    compute_normals(volume, &mut output, config);
+  }
 
   output
 }
@@ -312,7 +321,7 @@ fn compute_gradient_normals(volume: &[SdfSample; SAMPLE_SIZE_CB], output: &mut M
 
     // Load 8 corner samples
     let samples: [f32; 8] =
-      std::array::from_fn(|i| sdf_conversion::to_float(volume[base_idx + CORNER_OFFSETS[i]]));
+      std::array::from_fn(|i| sdf_conversion::to_float(volume[base_idx + CORNER_OFFSETS[i]], 1.0));
 
     vertex.normal = gradient::compute(&samples);
   }
@@ -344,7 +353,7 @@ fn blend_boundary_normals(
       cell_pos[2] as usize,
     );
     let samples: [f32; 8] =
-      std::array::from_fn(|i| sdf_conversion::to_float(volume[base_idx + CORNER_OFFSETS[i]]));
+      std::array::from_fn(|i| sdf_conversion::to_float(volume[base_idx + CORNER_OFFSETS[i]], 1.0));
     let gradient_normal = gradient::compute(&samples);
 
     // Blend: lerp from gradient (at boundary) to geometry (interior)
@@ -393,7 +402,7 @@ fn process_cell_geometry(
   }
 
   // Convert to f32 for vertex calculations
-  let samples: [f32; 8] = std::array::from_fn(|i| sdf_conversion::to_float(raw_samples[i]));
+  let samples: [f32; 8] = std::array::from_fn(|i| sdf_conversion::to_float(raw_samples[i], 1.0));
 
   // Compute vertex position using direct edge iteration (returns Vec3A)
   let cell_origin = Vec3A::new(x as f32, y as f32, z as f32);
@@ -489,18 +498,54 @@ fn emit_triangles(
       continue;
     }
 
+    // Diagonal optimization: split along the shorter diagonal for better triangle quality.
+    // Quad layout:
+    //   v_c --- v_a
+    //    |       |
+    //   v_b --- v_d
+    //
+    // Two possible splits:
+    //   - Diagonal A-B: triangles (A,B,C)+(A,D,B) or (A,B,D)+(A,C,B)
+    //   - Diagonal C-D: triangles (C,D,A)+(C,B,D) or (C,D,B)+(C,A,D)
+    let pos_a = output.vertices[v_a as usize].position;
+    let pos_b = output.vertices[v_b as usize].position;
+    let pos_c = output.vertices[v_c as usize].position;
+    let pos_d = output.vertices[v_d as usize].position;
+
+    let dist_ab_sq = (pos_a[0] - pos_b[0]).powi(2)
+      + (pos_a[1] - pos_b[1]).powi(2)
+      + (pos_a[2] - pos_b[2]).powi(2);
+    let dist_cd_sq = (pos_c[0] - pos_d[0]).powi(2)
+      + (pos_c[1] - pos_d[1]).powi(2)
+      + (pos_c[2] - pos_d[2]).powi(2);
+
+    let use_ab_diagonal = dist_ab_sq < dist_cd_sq;
+
     // Emit two triangles forming the quad
-    // Matching C# NaiveSurfaceNets exactly:
-    // flip=true:  (A,B,C), (A,D,B)
-    // flip=false: (A,B,D), (A,C,B)
-    if flip {
-      output.indices.extend_from_slice(&[
-        v_a as u32, v_b as u32, v_c as u32, v_a as u32, v_d as u32, v_b as u32,
-      ]);
+    if use_ab_diagonal {
+      // Split along A-B diagonal
+      if flip {
+        output.indices.extend_from_slice(&[
+          v_a as u32, v_b as u32, v_c as u32, v_a as u32, v_d as u32, v_b as u32,
+        ]);
+      } else {
+        output.indices.extend_from_slice(&[
+          v_a as u32, v_b as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32,
+        ]);
+      }
     } else {
-      output.indices.extend_from_slice(&[
-        v_a as u32, v_b as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32,
-      ]);
+      // Split along C-D diagonal (must maintain same winding as A-B case)
+      if flip {
+        // CCW winding: (C,A,D), (D,B,C)
+        output.indices.extend_from_slice(&[
+          v_c as u32, v_a as u32, v_d as u32, v_d as u32, v_b as u32, v_c as u32,
+        ]);
+      } else {
+        // CW winding: (C,D,A), (C,B,D)
+        output.indices.extend_from_slice(&[
+          v_c as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32, v_d as u32,
+        ]);
+      }
     }
   }
 }

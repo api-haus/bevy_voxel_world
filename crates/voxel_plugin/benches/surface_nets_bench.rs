@@ -24,7 +24,7 @@ fn generate_sphere_sdf_i8(center: [f32; 3], radius: f32) -> [SdfSample; SAMPLE_S
         let dz = z as f32 - center[2];
         let distance = (dx * dx + dy * dy + dz * dz).sqrt() - radius;
         let idx = (x << 10) | (y << 5) | z;
-        sdf[idx] = sdf_conversion::to_storage(distance);
+        sdf[idx] = sdf_conversion::to_storage(distance, 1.0);
       }
     }
   }
@@ -150,7 +150,7 @@ fn bench_complex_sdf(c: &mut Criterion) {
           min_dist = min_dist.min(dist);
         }
         let idx = (x << 10) | (y << 5) | z;
-        sdf_i8[idx] = sdf_conversion::to_storage(min_dist);
+        sdf_i8[idx] = sdf_conversion::to_storage(min_dist, 1.0);
       }
     }
   }

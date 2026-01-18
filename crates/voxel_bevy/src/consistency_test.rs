@@ -55,6 +55,7 @@ fn test_config() -> OctreeConfig {
     min_lod: 0,
     max_lod: 6,
     lod_exponent: 1.5,
+    world_bounds: None,
   }
 }
 

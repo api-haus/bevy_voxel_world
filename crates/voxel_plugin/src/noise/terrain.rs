@@ -7,53 +7,60 @@ use crate::types::{sdf_conversion, MaterialId, SdfSample};
 
 /// Volume sampler using a single FastNoise2 encoded node tree.
 ///
-/// Samples a 3D noise graph directly as SDF values. The noise output
-/// is scaled and offset to produce the final SDF. Works identically
-/// on native and WASM through the unified NoiseNode API.
+/// Samples a 3D noise graph as SDF values for volumetric shapes.
+/// The noise output is scaled to properly utilize the i8 quantization range.
+///
+/// SDF formula: `sdf = noise * scale`
+///
+/// Where `sdf < 0` is solid and `sdf > 0` is air.
+///
+/// **Important:** FastNoise2 typically outputs [-1, 1]. To avoid quantization
+/// stepping artifacts, set `scale` to utilize more of the ±10.0 storage range.
+/// Default scale of 8.0 maps noise [-1, 1] to SDF [-8, 8], using ~200 of 254
+/// quantization levels.
 #[derive(Clone)]
 pub struct FastNoise2Terrain {
   encoded: &'static str,
-  /// Multiplier for noise output (scales SDF range)
+  /// Multiplier for noise output (default: 8.0)
+  /// Maps noise range to SDF range. Higher = more quantization levels used.
+  /// With noise in [-1,1]: scale=8.0 → SDF in [-8,8] → ~200 quantization levels
   pub scale: f32,
-  /// Offset added to scaled noise (shifts the surface)
-  pub offset: f32,
-  /// Frequency multiplier for noise sampling (default: 1.0)
+  /// Frequency multiplier for noise sampling (default: 0.1)
   /// Smaller = larger terrain features
   pub frequency: f32,
   pub seed: i32,
 }
 
 impl FastNoise2Terrain {
-  /// Create a new volume sampler with default preset.
-  pub fn new(seed: i32) -> Self {
-    Self {
-      encoded: presets::SIMPLE_TERRAIN,
-      scale: 1.0,
-      offset: 0.0,
-      frequency: 1.0,
-      seed,
-    }
-  }
+	/// Create a new volume sampler with default preset.
+	pub fn new(seed: i32) -> Self {
+		Self {
+			encoded: presets::SIMPLE_TERRAIN,
+			scale: 8.0,  // Use most of ±10.0 quantization range
+			frequency: 0.1,
+			seed,
+		}
+	}
 
-  /// Create a volume sampler with a custom encoded noise graph.
-  ///
-  /// Encoded strings can be exported from FastNoise2's NoiseTool application.
-  pub fn with_encoded(encoded: &'static str, seed: i32) -> Self {
-    Self {
-      encoded,
-      scale: 1.0,
-      offset: 0.0,
-      frequency: 1.0,
-      seed,
-    }
-  }
+	/// Create a volume sampler with a custom encoded noise graph.
+	///
+	/// Encoded strings can be exported from FastNoise2's NoiseTool application.
+	pub fn with_encoded(encoded: &'static str, seed: i32) -> Self {
+		Self {
+			encoded,
+			scale: 8.0,
+			frequency: 0.1,
+			seed,
+		}
+	}
 
-  /// Set scale and offset for noise-to-SDF conversion.
+  /// Set scale for noise-to-SDF conversion.
   ///
-  /// `sdf = noise * scale + offset`
-  pub fn with_scale_offset(mut self, scale: f32, offset: f32) -> Self {
+  /// FastNoise2 outputs [-1, 1]. Scale maps this to the SDF storage range (±10.0).
+  /// - scale=8.0 (default): Uses ~200 of 254 quantization levels
+  /// - scale=1.0: Only ~25 levels, causes visible stepping
+  pub fn with_scale(mut self, scale: f32) -> Self {
     self.scale = scale;
-    self.offset = offset;
     self
   }
 
@@ -67,6 +74,7 @@ impl FastNoise2Terrain {
 }
 
 impl VolumeSampler for FastNoise2Terrain {
+  #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "noise::sample_volume"))]
   fn sample_volume(
     &self,
     grid_offset: [i64; 3],
@@ -103,7 +111,7 @@ impl VolumeSampler for FastNoise2Terrain {
       self.seed,
     );
 
-    // Convert noise to SDF with scale and offset
+    // Convert noise to SDF with scale
     // CRITICAL: Remap axis ordering from FastNoise2 to volume layout
     // FastNoise2 outputs X-fastest: fn_idx = z * SIZE² + y * SIZE + x
     // Volume uses X-slowest: vol_idx = x * SIZE² + y * SIZE + z
@@ -116,8 +124,10 @@ impl VolumeSampler for FastNoise2Terrain {
       // FastNoise2 index: X-fastest layout
       let fn_idx = z * SIZE * SIZE + y * SIZE + x;
 
-      let sdf = noise[fn_idx] * self.scale + self.offset;
-      volume[vol_idx] = sdf_conversion::to_storage(sdf);
+      // Scale noise to world units, then quantize with voxel-size awareness
+      // Noise typically [-1, 1], scale converts to world units
+      let sdf = noise[fn_idx] * self.scale;
+      volume[vol_idx] = sdf_conversion::to_storage(sdf, voxel_size as f32);
       materials[vol_idx] = 0;
     }
   }

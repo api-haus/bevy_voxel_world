@@ -32,6 +32,7 @@ use crate::surface_nets;
 /// Mesh a single node using surface nets algorithm.
 ///
 /// This is a pure function that wraps `surface_nets::generate()` with timing.
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "pipeline::mesh_node"))]
 pub fn mesh_node(input: MeshInput) -> MeshResult {
   let start = Instant::now();
   let output = surface_nets::generate(&input.volume, &input.materials, &input.config);
@@ -48,6 +49,7 @@ pub fn mesh_node(input: MeshInput) -> MeshResult {
 /// Mesh multiple nodes in parallel using rayon.
 ///
 /// Results maintain the same order as inputs for deterministic output.
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "pipeline::mesh_batch"))]
 pub fn mesh_batch(inputs: Vec<MeshInput>) -> Vec<MeshResult> {
   if inputs.is_empty() {
     return Vec::new();

@@ -9,6 +9,15 @@ crossbeam-channel = "0.5"
 glam = { version = "0.30", features = ["std"] }
 smallvec = "1.13"
 web-time = "1.1"
+simdnoise = "3.1"
+tracing = { version = "0.1", optional = true }
+
+[features]
+default = []
+# Engine-agnostic metrics collection
+metrics = []
+# Tracing instrumentation for profilers (Tracy, etc.)
+tracing = ["dep:tracing"]
 
 # Native: voxel_noise for FastNoise2 FFI wrapper
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

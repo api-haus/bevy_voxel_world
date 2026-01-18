@@ -197,6 +197,7 @@ fn test_bevy_presentation_consistency() {
     min_lod: 0,
     max_lod: 6,
     lod_exponent: 1.5,
+    world_bounds: None,
   };
 
   let sampler = FastNoise2Terrain::new(1337);
@@ -365,6 +366,7 @@ fn test_bevy_presentation_rapid_zoom() {
     min_lod: 0,
     max_lod: 6,
     lod_exponent: 1.5,
+    world_bounds: None,
   };
 
   let sampler = FastNoise2Terrain::new(1337);
@@ -472,6 +474,7 @@ fn test_bevy_presentation_async_delay() {
     min_lod: 0,
     max_lod: 6,
     lod_exponent: 1.5,
+    world_bounds: None,
   };
 
   let sampler = FastNoise2Terrain::new(1337);
@@ -609,6 +612,7 @@ fn test_ghost_cells_with_async_gap() {
     min_lod: 0,
     max_lod: 6,
     lod_exponent: 1.5,
+    world_bounds: None,
   };
 
   let sampler = FastNoise2Terrain::new(1337);

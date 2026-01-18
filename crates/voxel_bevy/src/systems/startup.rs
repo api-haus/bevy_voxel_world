@@ -42,6 +42,7 @@ pub fn setup_octree_scene(
     min_lod: 0,
     max_lod: 6,
     lod_exponent: 1.5, // Controls LOD distance thresholds
+    world_bounds: None,
   };
 
   // 3. Initialize octree with a grid at INITIAL_LOD

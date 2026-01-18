@@ -67,29 +67,45 @@ pub fn all_children_are_leaves(parent: &OctreeNode, leaves: &HashSet<OctreeNode>
   })
 }
 
-/// Apply a subdivide operation: remove parent, add 8 children.
+/// Apply a subdivide operation: remove parent, add children.
+///
+/// When world bounds are set, only adds children that overlap the bounds.
 pub fn apply_subdivide(
-  parent: &OctreeNode,
-  leaves: &mut HashSet<OctreeNode>,
-  groups: &mut Vec<TransitionGroup>,
+	parent: &OctreeNode,
+	leaves: &mut HashSet<OctreeNode>,
+	groups: &mut Vec<TransitionGroup>,
+	config: Option<&OctreeConfig>,
 ) {
-  // Cannot subdivide at LOD 0
-  if parent.lod <= 0 {
-    return;
-  }
+	// Cannot subdivide at LOD 0
+	if parent.lod <= 0 {
+		return;
+	}
 
-  // Create transition group
-  if let Some(group) = TransitionGroup::new_subdivide(*parent) {
-    // Remove parent from leaves
-    leaves.remove(parent);
+	// Collect children, optionally filtering by world bounds
+	let children: smallvec::SmallVec<[OctreeNode; 8]> = (0..8u8)
+		.filter_map(|octant| parent.get_child(octant))
+		.filter(|child| {
+			// If config provided, filter by bounds; otherwise include all
+			config.map_or(true, |c| c.node_overlaps_bounds(child))
+		})
+		.collect();
 
-    // Add all 8 children to leaves
-    for child in &group.nodes_to_add {
-      leaves.insert(*child);
-    }
+	if children.is_empty() {
+		return;
+	}
 
-    groups.push(group);
-  }
+	// Create transition group with filtered children
+	if let Some(group) = TransitionGroup::new_subdivide_filtered(*parent, children) {
+		// Remove parent from leaves
+		leaves.remove(parent);
+
+		// Add filtered children to leaves
+		for child in &group.nodes_to_add {
+			leaves.insert(*child);
+		}
+
+		groups.push(group);
+	}
 }
 
 /// Apply a merge operation: remove 8 children, add parent.
@@ -191,15 +207,15 @@ fn enforce_neighbor_gradation(
         if let Some(neighbor) = find_face_neighbor(&node, dir, leaves, config.max_lod) {
           let lod_diff = neighbor.lod - node.lod;
 
-          // If neighbor is too coarse, subdivide it
-          if lod_diff > budget.max_relative_lod {
-            // Can only subdivide if neighbor LOD > MinLOD
-            if neighbor.lod > config.min_lod && leaves.contains(&neighbor) {
-              apply_subdivide(&neighbor, leaves, groups);
-              neighbor_subdivisions += 1;
-              changed = true;
-            }
-          }
+					// If neighbor is too coarse, subdivide it
+					if lod_diff > budget.max_relative_lod {
+						// Can only subdivide if neighbor LOD > MinLOD
+						if neighbor.lod > config.min_lod && leaves.contains(&neighbor) {
+							apply_subdivide(&neighbor, leaves, groups, Some(config));
+							neighbor_subdivisions += 1;
+							changed = true;
+						}
+					}
         }
       }
     }
@@ -227,6 +243,7 @@ fn enforce_neighbor_gradation(
 /// 4. **Apply collapses**: Shed distant load first (budget-limited)
 /// 5. **Apply subdivisions**: Add nearby detail (budget-limited)
 /// 6. **Enforce neighbors**: Fix LOD gradation to prevent T-junctions
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "octree::refine"))]
 pub fn refine(input: RefinementInput) -> RefinementOutput {
   let mut next_leaves = input.prev_leaves.clone();
   let mut to_subdivide: Vec<OctreeNode> = Vec::new();
@@ -234,90 +251,119 @@ pub fn refine(input: RefinementInput) -> RefinementOutput {
   let mut stats = RefinementStats::default();
 
   // Phase 1: Identify candidates
-  for node in &input.prev_leaves {
-    // Check subdivision (LOD > MinLOD)
-    if node.lod > input.config.min_lod {
-      let center = input.config.get_node_center(node);
-      let dist = input.viewer_pos.distance(center);
-      let threshold = input.config.get_threshold(node.lod);
-
-      if dist < threshold {
-        to_subdivide.push(*node);
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("identify_candidates").entered();
+    for node in &input.prev_leaves {
+      // Skip nodes outside world bounds
+      if !input.config.node_overlaps_bounds(node) {
         continue;
       }
-    }
 
-    // Check coarsening (LOD < MaxLOD)
-    if node.lod < input.config.max_lod {
-      if let Some(parent) = node.get_parent(input.config.max_lod) {
-        let parent_center = input.config.get_node_center(&parent);
-        let parent_dist = input.viewer_pos.distance(parent_center);
-        let parent_threshold = input.config.get_threshold(parent.lod);
+      // Check subdivision (LOD > MinLOD)
+      if node.lod > input.config.min_lod {
+        let center = input.config.get_node_center(node);
+        let dist = input.viewer_pos.distance(center);
+        let threshold = input.config.get_threshold(node.lod);
 
-        if parent_dist >= parent_threshold {
-          coarsen_candidates.insert(parent);
+        if dist < threshold {
+          to_subdivide.push(*node);
+          continue;
+        }
+      }
+
+      // Check coarsening (LOD < MaxLOD)
+      if node.lod < input.config.max_lod {
+        if let Some(parent) = node.get_parent(input.config.max_lod) {
+          let parent_center = input.config.get_node_center(&parent);
+          let parent_dist = input.viewer_pos.distance(parent_center);
+          let parent_threshold = input.config.get_threshold(parent.lod);
+
+          if parent_dist >= parent_threshold {
+            coarsen_candidates.insert(parent);
+          }
         }
       }
     }
   }
 
   // Phase 2: Validate coarsening (all 8 children must be leaves)
-  let valid_coarsen: Vec<_> = coarsen_candidates
-    .into_iter()
-    .filter(|parent| all_children_are_leaves(parent, &next_leaves))
-    .collect();
+  let valid_coarsen: Vec<_> = {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("validate_coarsen").entered();
+    coarsen_candidates
+      .into_iter()
+      .filter(|parent| all_children_are_leaves(parent, &next_leaves))
+      .collect()
+  };
 
   // Phase 3: Sort by priority
   let config = &input.config;
   let viewer_pos = input.viewer_pos;
 
-  // Subdivisions: closest first (highest priority)
   let mut to_subdivide = to_subdivide;
-  to_subdivide.sort_by(|a, b| {
-    let da = viewer_pos.distance_squared(config.get_node_center(a));
-    let db = viewer_pos.distance_squared(config.get_node_center(b));
-    da.partial_cmp(&db).unwrap()
-  });
-
-  // Collapses: farthest first (shed distant load)
   let mut valid_coarsen = valid_coarsen;
-  valid_coarsen.sort_by(|a, b| {
-    let da = viewer_pos.distance_squared(config.get_node_center(a));
-    let db = viewer_pos.distance_squared(config.get_node_center(b));
-    db.partial_cmp(&da).unwrap() // Reversed!
-  });
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("sort_by_priority").entered();
+    // Subdivisions: closest first (highest priority)
+    to_subdivide.sort_by(|a, b| {
+      let da = viewer_pos.distance_squared(config.get_node_center(a));
+      let db = viewer_pos.distance_squared(config.get_node_center(b));
+      da.partial_cmp(&db).unwrap()
+    });
+
+    // Collapses: farthest first (shed distant load)
+    valid_coarsen.sort_by(|a, b| {
+      let da = viewer_pos.distance_squared(config.get_node_center(a));
+      let db = viewer_pos.distance_squared(config.get_node_center(b));
+      db.partial_cmp(&da).unwrap() // Reversed!
+    });
+  }
 
   let mut transition_groups = Vec::new();
 
   // Phase 4: Apply collapses first (shed load)
-  for parent in valid_coarsen.into_iter() {
-    if !input.budget.can_collapse(stats.collapses_performed) {
-      break;
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("apply_collapses").entered();
+    for parent in valid_coarsen.into_iter() {
+      if !input.budget.can_collapse(stats.collapses_performed) {
+        break;
+      }
+      apply_merge(&parent, &mut next_leaves, &mut transition_groups);
+      stats.collapses_performed += 1;
     }
-    apply_merge(&parent, &mut next_leaves, &mut transition_groups);
-    stats.collapses_performed += 1;
   }
 
   // Phase 5: Apply subdivisions
-  for node in to_subdivide.into_iter() {
-    if !input.budget.can_subdivide(stats.subdivisions_performed) {
-      break;
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("apply_subdivisions").entered();
+    for node in to_subdivide.into_iter() {
+      if !input.budget.can_subdivide(stats.subdivisions_performed) {
+        break;
+      }
+      // Skip if already removed by a collapse
+      if !next_leaves.contains(&node) {
+        continue;
+      }
+      apply_subdivide(&node, &mut next_leaves, &mut transition_groups, Some(config));
+      stats.subdivisions_performed += 1;
     }
-    // Skip if already removed by a collapse
-    if !next_leaves.contains(&node) {
-      continue;
-    }
-    apply_subdivide(&node, &mut next_leaves, &mut transition_groups);
-    stats.subdivisions_performed += 1;
   }
 
   // Phase 6: Neighbor enforcement
-  stats.neighbor_subdivisions_performed = enforce_neighbor_gradation(
-    &mut next_leaves,
-    &mut transition_groups,
-    &input.config,
-    &input.budget,
-  );
+  {
+    #[cfg(feature = "tracing")]
+    let _span = tracing::info_span!("neighbor_enforcement").entered();
+    stats.neighbor_subdivisions_performed = enforce_neighbor_gradation(
+      &mut next_leaves,
+      &mut transition_groups,
+      &input.config,
+      &input.budget,
+    );
+  }
 
   // Sort transition groups by proximity (for presentation priority)
   transition_groups.sort_by(|a, b| {

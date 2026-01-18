@@ -4,11 +4,15 @@
 //! providing mesh rendering and LOD management.
 
 pub mod components;
+pub mod entity_queue;
 pub mod fly_camera;
 pub mod input;
 pub mod resources;
 pub mod systems;
 pub mod world;
+
+#[cfg(feature = "debug_ui")]
+pub mod debug_ui;
 
 #[cfg(test)]
 mod presentation_test;
@@ -18,10 +22,14 @@ mod consistency_test;
 
 use bevy::prelude::*;
 pub use components::*;
+pub use entity_queue::{EntityQueue, EntityQueueConfig, QueueStats};
 pub use fly_camera::*;
 pub use input::{fly_camera_input_bundle, CameraInputContext, CameraInputPlugin};
 pub use resources::*;
 pub use world::{VoxelWorldRoot, WorldChunkMap};
+
+// Re-export metrics types for convenience
+pub use voxel_plugin::metrics::{WorldMetrics, RollingWindow};
 
 /// Bevy plugin for voxel LOD rendering.
 pub struct VoxelBevyPlugin;

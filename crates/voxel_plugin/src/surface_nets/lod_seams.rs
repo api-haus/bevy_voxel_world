@@ -348,8 +348,8 @@ pub fn compute_displaced_position(
 
     let idx = coord_to_index(sample_x, sample_y, sample_z);
     let sdf = volume[idx];
-    // Use proper SDF scaling for smooth interpolation
-    samples[corner] = sdf_conversion::to_float(sdf);
+    // Use proper SDF scaling for smooth interpolation (1.0 for cell-local calculations)
+    samples[corner] = sdf_conversion::to_float(sdf, 1.0);
 
     if sdf < 0 {
       corner_mask |= 1 << corner;

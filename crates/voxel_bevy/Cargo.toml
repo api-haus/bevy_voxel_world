@@ -9,6 +9,8 @@ bevy = { workspace = true }
 rayon = { workspace = true }
 smallvec = "1.13"
 bevy_enhanced_input = "0.22"
+bevy_egui = { version = "0.39", optional = true }
+egui = { version = "0.33", optional = true }
 
 # Noise is now in voxel_plugin which handles native/wasm automatically
 
@@ -16,6 +18,12 @@ bevy_enhanced_input = "0.22"
 default = []
 # Stub feature for WASM builds (atomics handled at trunk level)
 wasm-atomics = []
+# Tracy profiler integration (uses bevy's tracing-tracy)
+trace_tracy = ["bevy/trace_tracy", "voxel_plugin/tracing"]
+# Engine-agnostic metrics
+metrics = ["voxel_plugin/metrics"]
+# Debug UI with egui (requires metrics)
+debug_ui = ["metrics", "bevy_egui", "egui"]
 
 [dev-dependencies]
 rand = "0.9"

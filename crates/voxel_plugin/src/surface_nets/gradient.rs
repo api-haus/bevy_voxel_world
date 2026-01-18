@@ -57,6 +57,7 @@ pub fn compute(samples: &[f32; 8]) -> [f32; 3] {
 ///
 /// Reference: Thürmer, G. & Wüthrich, C.A. (1998). Computing Vertex Normals
 /// from Polygonal Facets. Journal of Graphics Tools, 3(1), 43-46.
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "gradient::recalculate_from_geometry"))]
 pub fn recalculate_from_geometry(output: &mut MeshOutput) {
   // Reset all normals
   for vertex in &mut output.vertices {

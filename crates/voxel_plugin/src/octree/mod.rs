@@ -23,6 +23,7 @@
 //!   operations
 //! - (future) `refinement`: LOD refinement algorithm
 
+pub mod bounds;
 pub mod budget;
 pub mod config;
 pub mod leaves;
@@ -31,6 +32,7 @@ pub mod refinement;
 pub mod transition;
 
 // Re-exports
+pub use bounds::DAabb3;
 pub use budget::{RefinementBudget, RefinementStats};
 pub use config::OctreeConfig;
 pub use leaves::OctreeLeaves;

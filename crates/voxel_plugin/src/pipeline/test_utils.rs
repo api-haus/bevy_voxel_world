@@ -35,11 +35,6 @@ impl SphereSampler {
     Self::new(DVec3::ZERO, radius)
   }
 
-  /// Sample single point (used internally).
-  fn sample_point(&self, world_pos: DVec3) -> SdfSample {
-    let dist = (world_pos - self.center).length() - self.radius;
-    sdf_conversion::to_storage(dist as f32)
-  }
 }
 
 impl VolumeSampler for SphereSampler {
@@ -60,7 +55,8 @@ impl VolumeSampler for SphereSampler {
             (grid_offset[1] + y as i64) as f64 * voxel_size,
             (grid_offset[2] + z as i64) as f64 * voxel_size,
           );
-          volume[idx] = self.sample_point(world_pos);
+          let dist = (world_pos - self.center).length() - self.radius;
+          volume[idx] = sdf_conversion::to_storage(dist as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }
@@ -130,12 +126,6 @@ impl PlaneSampler {
       normal: DVec3::Y,
     }
   }
-
-  /// Sample single point (used internally).
-  fn sample_point(&self, world_pos: DVec3) -> SdfSample {
-    let dist = (world_pos - self.point).dot(self.normal);
-    sdf_conversion::to_storage(dist as f32)
-  }
 }
 
 impl VolumeSampler for PlaneSampler {
@@ -155,7 +145,8 @@ impl VolumeSampler for PlaneSampler {
             (grid_offset[1] + y as i64) as f64 * voxel_size,
             (grid_offset[2] + z as i64) as f64 * voxel_size,
           );
-          volume[idx] = self.sample_point(world_pos);
+          let dist = (world_pos - self.point).dot(self.normal);
+          volume[idx] = sdf_conversion::to_storage(dist as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }
@@ -350,6 +341,8 @@ pub fn merge_fixture(lod: i32) -> TransitionGroup {
 }
 
 /// Generate a sphere volume for testing meshing.
+///
+/// Uses voxel_size=1.0 (cell-based coordinates).
 pub fn make_sphere_volume(
   radius: f32,
 ) -> (
@@ -368,7 +361,7 @@ pub fn make_sphere_volume(
         let dy = y as f32 - center;
         let dz = z as f32 - center;
         let dist = (dx * dx + dy * dy + dz * dz).sqrt() - radius;
-        volume[idx] = sdf_conversion::to_storage(dist);
+        volume[idx] = sdf_conversion::to_storage(dist, 1.0);
         materials[idx] = 0;
       }
     }

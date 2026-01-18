@@ -98,6 +98,7 @@ fn compute_neighbor_mask(
 /// # Returns
 ///
 /// Ready chunks with presentation hints, ready for engine integration.
+#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "pipeline::process_transitions"))]
 pub fn process_transitions<S: VolumeSampler>(
   world_id: WorldId,
   transition_groups: &[TransitionGroup],

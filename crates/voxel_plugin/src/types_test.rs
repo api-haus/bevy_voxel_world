@@ -2,42 +2,63 @@ use sdf_conversion::*;
 
 use super::*;
 
+// Use voxel_size=1.0 for tests (SDF in world units = SDF in voxel units)
+const TEST_VOXEL_SIZE: f32 = 1.0;
+
 // SDF conversion tests
 #[test]
 fn test_roundtrip_zero() {
-  assert_eq!(to_float(to_storage(0.0)), 0.0);
+  assert_eq!(to_float(to_storage(0.0, TEST_VOXEL_SIZE), TEST_VOXEL_SIZE), 0.0);
 }
 
 #[test]
 fn test_roundtrip_positive() {
-  let sdf = 5.0;
-  let stored = to_storage(sdf);
-  let recovered = to_float(stored);
+  // Use value within range (±RANGE_VOXELS = ±1.0)
+  let sdf = 0.5;
+  let stored = to_storage(sdf, TEST_VOXEL_SIZE);
+  let recovered = to_float(stored, TEST_VOXEL_SIZE);
   // Should be within one quantization level
-  assert!((sdf - recovered).abs() < INV_SCALE * 1.5);
+  let inv_scale = RANGE_VOXELS / 127.0;
+  assert!((sdf - recovered).abs() < inv_scale * 1.5);
 }
 
 #[test]
 fn test_roundtrip_negative() {
-  let sdf = -3.5;
-  let stored = to_storage(sdf);
-  let recovered = to_float(stored);
-  assert!((sdf - recovered).abs() < INV_SCALE * 1.5);
+  // Use value within range (±RANGE_VOXELS = ±1.0)
+  let sdf = -0.5;
+  let stored = to_storage(sdf, TEST_VOXEL_SIZE);
+  let recovered = to_float(stored, TEST_VOXEL_SIZE);
+  let inv_scale = RANGE_VOXELS / 127.0;
+  assert!((sdf - recovered).abs() < inv_scale * 1.5);
 }
 
 #[test]
 fn test_clamping() {
-  // Values beyond ±10 should clamp to ±127
-  assert_eq!(to_storage(100.0), 127);
-  assert_eq!(to_storage(-100.0), -127);
+  // Values beyond ±RANGE_VOXELS should clamp to ±127
+  assert_eq!(to_storage(100.0, TEST_VOXEL_SIZE), 127);
+  assert_eq!(to_storage(-100.0, TEST_VOXEL_SIZE), -127);
 }
 
 #[test]
 fn test_scale_factor() {
-  // Scale should map ±10 to ±127
-  assert!((SCALE - 12.7).abs() < 0.01);
-  assert_eq!(to_storage(10.0), 127);
-  assert_eq!(to_storage(-10.0), -127);
+  // Scale should map ±RANGE_VOXELS (±1.0) to ±127
+  // BASE_SCALE = 127.0 / RANGE_VOXELS = 127.0 / 1.0 = 127.0
+  assert!((BASE_SCALE - 127.0).abs() < 0.01);
+  assert_eq!(to_storage(RANGE_VOXELS, TEST_VOXEL_SIZE), 127);
+  assert_eq!(to_storage(-RANGE_VOXELS, TEST_VOXEL_SIZE), -127);
+}
+
+#[test]
+fn test_voxel_size_scaling() {
+  // With voxel_size=2.0, an SDF of 2.0 world units = 1.0 voxel units
+  // Should produce same quantized value as sdf=1.0 with voxel_size=1.0
+  let stored_small = to_storage(1.0, 1.0);
+  let stored_large = to_storage(2.0, 2.0);
+  assert_eq!(stored_small, stored_large);
+
+  // And recover correctly
+  let recovered = to_float(stored_large, 2.0);
+  assert!((recovered - 2.0).abs() < 0.2); // Allow for quantization error
 }
 
 // General types tests

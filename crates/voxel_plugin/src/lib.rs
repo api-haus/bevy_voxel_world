@@ -69,3 +69,7 @@ pub use noise::FastNoise2Terrain;
 // Simple SDF samplers for testing
 pub mod sdf_samplers;
 pub use sdf_samplers::{BoxSampler, GroundPlaneSampler, SphereSampler, TiltedPlaneSampler};
+
+// Metrics collection (feature-gated)
+pub mod metrics;
+pub use metrics::{WorldMetrics, RollingWindow, COLLECT_METRICS};

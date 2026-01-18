@@ -8,10 +8,14 @@ name = "voxel_game"
 path = "src/main.rs"
 
 [features]
-default = ["dev"]
+default = ["dev", "metrics"]
 dev = ["bevy/dynamic_linking"]
 # Enable atomics/shared-memory for WASM builds (required for rayon workers)
 wasm-atomics = ["voxel_bevy/wasm-atomics"]
+# Tracy profiler integration
+trace_tracy = ["voxel_bevy/trace_tracy"]
+# Metrics collection (enabled by default)
+metrics = ["voxel_bevy/debug_ui"]
 
 [dependencies]
 voxel_plugin = { path = "../voxel_plugin" }

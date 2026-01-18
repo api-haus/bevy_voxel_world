@@ -25,7 +25,9 @@ pub enum NormalMode {
 
 impl Default for NormalMode {
   fn default() -> Self {
-    NormalMode::Gradient
+    NormalMode::Blended {
+      blend_distance: 2.0,
+    }
   }
 }
 
@@ -34,41 +36,51 @@ pub type MaterialId = u8;
 
 /// SDF conversion utilities for quantized storage.
 ///
-/// Maps float SDF to i8 [-127, +127] with ±10 world unit range.
-/// Precision: ~0.079 world units per level (254 levels over 20 units).
-/// Extended range allows smooth blend fillet depths up to 10.
+/// Maps float SDF to i8 [-127, +127] with voxel-size-aware scaling.
+/// The range scales with voxel size to maintain consistent precision
+/// across LOD levels: ±(RANGE_VOXELS * voxel_size) world units.
+///
+/// This ensures ~12.7 quantization levels per voxel regardless of LOD,
+/// providing smooth gradients for Surface Nets interpolation.
 pub mod sdf_conversion {
-  /// SDF range in world units (values outside this clamp to ±127).
-  pub const RANGE: f32 = 10.0;
+  /// SDF range in voxel units (how many voxels from surface we can represent).
+  pub const RANGE_VOXELS: f32 = 1.0;
 
-  /// Scale factor: 127 / RANGE = 12.7
-  pub const SCALE: f32 = 127.0 / RANGE;
+  /// Base scale factor: 127 / RANGE_VOXELS = 12.7 levels per voxel
+  pub const BASE_SCALE: f32 = 127.0 / RANGE_VOXELS;
 
-  /// Inverse scale for converting back to float.
-  pub const INV_SCALE: f32 = RANGE / 127.0;
-
-  /// Convert float SDF to quantized i8 storage.
+  /// Convert float SDF to quantized i8 storage with voxel size scaling.
   ///
   /// # Arguments
   /// * `sdf` - SDF value in world units
+  /// * `voxel_size` - Size of one voxel in world units
   ///
   /// # Returns
   /// Quantized i8 value scaled to fit ±127 range
+  ///
+  /// # Formula
+  /// `quantized = (sdf / voxel_size) * BASE_SCALE`
+  ///
+  /// This normalizes SDF to voxel units before quantization, ensuring
+  /// consistent precision regardless of voxel size.
   #[inline(always)]
-  pub fn to_storage(sdf: f32) -> i8 {
-    (sdf * SCALE).clamp(-127.0, 127.0).round() as i8
+  pub fn to_storage(sdf: f32, voxel_size: f32) -> i8 {
+    let sdf_in_voxels = sdf / voxel_size;
+    (sdf_in_voxels * BASE_SCALE).clamp(-127.0, 127.0).round() as i8
   }
 
   /// Convert quantized i8 storage back to float SDF.
   ///
   /// # Arguments
   /// * `value` - Quantized i8 sample
+  /// * `voxel_size` - Size of one voxel in world units
   ///
   /// # Returns
   /// SDF value in world units
   #[inline(always)]
-  pub fn to_float(value: i8) -> f32 {
-    value as f32 * INV_SCALE
+  pub fn to_float(value: i8, voxel_size: f32) -> f32 {
+    let sdf_in_voxels = value as f32 / BASE_SCALE;
+    sdf_in_voxels * voxel_size
   }
 }
 

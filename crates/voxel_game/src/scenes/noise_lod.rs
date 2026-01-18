@@ -15,22 +15,27 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use smallvec::SmallVec;
 use voxel_bevy::components::{VoxelChunk, VoxelViewer};
+use voxel_bevy::entity_queue::{EntityQueue, EntityQueueConfig};
 use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
 use voxel_bevy::input::{fly_camera_input_bundle, CameraInputContext};
-use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
-use voxel_bevy::resources::{ChunkEntityMap, LodMaterials};
+use voxel_bevy::resources::{ChunkEntityMap, LodMaterials, VoxelMetricsResource};
 use voxel_bevy::systems::entities::spawn_chunk_entity;
 use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
+#[cfg(feature = "metrics")]
+use voxel_bevy::debug_ui::voxel_metrics_ui;
+use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain, SimdNoiseTerrain};
 use voxel_plugin::octree::{
-  refine, OctreeConfig, OctreeNode, RefinementBudget, RefinementInput, TransitionGroup,
-  TransitionType,
+	DAabb3, OctreeConfig, OctreeNode, RefinementBudget, TransitionGroup, TransitionType,
 };
-use voxel_plugin::pipeline::{sample_volume_for_node, AsyncPipeline, PipelineEvent};
+use voxel_plugin::pipeline::{
+	sample_volume_for_node, AsyncPipeline, AsyncRefinementPipeline, PipelineEvent,
+	RefinementRequest,
+};
 use voxel_plugin::surface_nets;
 use voxel_plugin::types::MeshConfig;
 
@@ -39,8 +44,8 @@ use super::{Scene, SceneEntity};
 /// Re-use DVec3 from bevy
 type DVec3 = bevy::math::DVec3;
 
-/// Initial LOD for octree (coarse starting point, will refine from here).
-const INITIAL_LOD: i32 = 4;
+/// World size in units (100k x 100k x 100k centered at origin).
+const WORLD_HALF_EXTENT: f64 = 50000.0;
 
 /// Plugin for the noise LOD scene
 pub struct NoiseLodPlugin;
@@ -51,6 +56,7 @@ impl Plugin for NoiseLodPlugin {
       .init_resource::<UiSettings>()
       .init_resource::<WorldChunkMap>()
       .init_resource::<AsyncRefinementState>()
+      .init_resource::<VoxelMetricsResource>()
       .add_message::<RebuildWorldEvent>()
       .add_message::<RefineWorldEvent>()
       .add_message::<InitialMeshGenEvent>()
@@ -64,8 +70,10 @@ impl Plugin for NoiseLodPlugin {
           toggle_lod_colors.run_if(in_state(Scene::NoiseLod)),
           rebuild_world.run_if(in_state(Scene::NoiseLod)),
           initial_mesh_gen.run_if(in_state(Scene::NoiseLod)),
+          poll_initial_mesh_gen.run_if(in_state(Scene::NoiseLod)),
           start_refinement.run_if(in_state(Scene::NoiseLod)),
-          poll_async_refinement.run_if(in_state(Scene::NoiseLod)),
+          poll_refinement_results.run_if(in_state(Scene::NoiseLod)),
+          process_entity_queue.run_if(in_state(Scene::NoiseLod)),
           continuous_refinement.run_if(in_state(Scene::NoiseLod)),
         ),
       )
@@ -74,6 +82,8 @@ impl Plugin for NoiseLodPlugin {
         (
           ui_controls.run_if(in_state(Scene::NoiseLod)),
           instructions_ui.run_if(in_state(Scene::NoiseLod)),
+          #[cfg(feature = "metrics")]
+          voxel_debug_ui.run_if(in_state(Scene::NoiseLod)),
         ),
       );
   }
@@ -91,13 +101,13 @@ fn cleanup_camera(mut commands: Commands, camera_query: Query<Entity, With<crate
 }
 
 /// Sampler source selection.
-/// Currently only FastNoise2, but designed for future samplers (SDF primitives,
-/// etc).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum SamplerSource {
   /// FastNoise2 terrain with caves (native FFI or WASM JS bridge).
   #[default]
   FastNoise2,
+  /// Pure-Rust SIMD noise (no FFI required).
+  SimdNoise,
 }
 
 impl SamplerSource {
@@ -105,6 +115,7 @@ impl SamplerSource {
   pub fn name(&self) -> &'static str {
     match self {
       Self::FastNoise2 => "FastNoise2",
+      Self::SimdNoise => "SimdNoise",
     }
   }
 }
@@ -132,25 +143,34 @@ impl Default for UiSettings {
 }
 
 /// Async refinement state resource.
-/// Tracks in-flight refinement operations using the cross-platform
-/// TaskExecutor.
+/// Tracks in-flight refinement operations and entity processing queues.
 #[derive(Resource)]
 struct AsyncRefinementState {
-  pipeline: AsyncPipeline,
-  /// Whether continuous refinement is enabled.
-  continuous: bool,
-  /// Frames since last refinement check (for throttling continuous mode).
-  frames_since_check: u32,
+	/// Old pipeline (for initial mesh gen only).
+	initial_pipeline: AsyncPipeline,
+	/// New async refinement pipeline (refine + mesh on background thread).
+	refinement_pipeline: AsyncRefinementPipeline,
+	/// Time-budgeted entity operation queue.
+	entity_queue: EntityQueue,
+	/// Whether continuous refinement is enabled.
+	continuous: bool,
+	/// Frames since last refinement check (for throttling continuous mode).
+	frames_since_check: u32,
 }
 
 impl Default for AsyncRefinementState {
-  fn default() -> Self {
-    Self {
-      pipeline: AsyncPipeline::new(),
-      continuous: false,
-      frames_since_check: 0,
-    }
-  }
+	fn default() -> Self {
+		Self {
+			initial_pipeline: AsyncPipeline::new(),
+			refinement_pipeline: AsyncRefinementPipeline::new(),
+			entity_queue: EntityQueue::new(EntityQueueConfig {
+				max_groups_per_frame: 8, // Apply up to 8 transition groups per frame
+				max_ms_per_frame: 4.0,   // 4ms budget
+			}),
+			continuous: false,
+			frames_since_check: 0,
+		}
+	}
 }
 
 /// Message to trigger world rebuild with new seed.
@@ -167,6 +187,7 @@ fn create_sampler(
 ) -> Box<dyn voxel_plugin::pipeline::VolumeSampler> {
   match sampler_source {
     SamplerSource::FastNoise2 => Box::new(FastNoise2Terrain::new(seed)),
+    SamplerSource::SimdNoise => Box::new(SimdNoiseTerrain::new(seed)),
   }
 }
 
@@ -183,39 +204,43 @@ struct InitialMeshGenEvent;
 // =============================================================================
 
 fn setup(
-  mut commands: Commands,
-  mut materials: ResMut<Assets<StandardMaterial>>,
-  mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
-  camera_query: Query<Entity, With<crate::MainCamera>>,
+	mut commands: Commands,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut materials: ResMut<Assets<StandardMaterial>>,
+	mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
+	camera_query: Query<Entity, With<crate::MainCamera>>,
 ) {
   info!("[NoiseLod] Setting up octree scene (async)...");
 
-  // 1. Create terrain sampler
-  let sampler = FastNoise2Terrain::new(1337);
+	// 1. Create terrain sampler (using default settings)
+	let default_settings = UiSettings::default();
+	let sampler = create_sampler(default_settings.sampler_source, default_settings.current_seed);
 
-  // 2. Create octree configuration
-  let config = OctreeConfig {
-    voxel_size: 0.25,
-    world_origin: DVec3::new(-500.0, -100.0, -500.0),
-    min_lod: 0,
-    max_lod: 6,
-    lod_exponent: 1.5,
-  };
+	// 2. Create world bounds (100k x 100k x 100k cube centered at origin)
+	let world_bounds = DAabb3::from_center_half_extents(
+		DVec3::ZERO,
+		DVec3::new(WORLD_HALF_EXTENT, WORLD_HALF_EXTENT, WORLD_HALF_EXTENT),
+	);
 
-  // 3. Create VoxelWorldRoot with initial coarse leaves only
-  let mut world_root = VoxelWorldRoot::new(config.clone(), Box::new(sampler));
+	// 3. Create octree configuration with world bounds
+	// Cell size at LOD 0 = 0.25 * 28 = 7 units
+	let config = OctreeConfig {
+		voxel_size: 0.25,
+		world_origin: DVec3::new(-WORLD_HALF_EXTENT, -WORLD_HALF_EXTENT, -WORLD_HALF_EXTENT),
+		min_lod: 0,
+		max_lod: 31,
+		lod_exponent: 2.0,
+		world_bounds: Some(world_bounds),
+	};
 
-  // Initialize with just a few coarse nodes - refinement will add detail
-  for x in -1..=1 {
-    for y in -1..=1 {
-      for z in -1..=1 {
-        world_root
-          .world
-          .leaves
-          .insert(OctreeNode::new(x, y, z, INITIAL_LOD));
-      }
-    }
-  }
+	// 4. Create VoxelWorldRoot with initial leaves computed from bounds
+	let mut world_root = VoxelWorldRoot::new(config.clone(), Box::new(sampler));
+
+	// Compute initial LOD and leaves from world bounds
+	let initial_lod = config.suggest_initial_lod();
+	for node in config.compute_initial_leaves(initial_lod) {
+		world_root.world.leaves.insert(node);
+	}
 
   info!(
     "[NoiseLod] Initial leaves: {} (generating async)",
@@ -232,70 +257,156 @@ fn setup(
   commands.insert_resource(ChunkEntityMap::default());
   commands.insert_resource(lod_materials);
 
-  // 7. Setup camera and lights immediately
-  setup_camera_and_lights(&mut commands, &camera_query);
+	// 7. Setup camera and lights immediately
+	setup_camera_and_lights(&mut commands, &camera_query);
 
-  // 8. Trigger initial mesh generation for starting leaves
-  initial_gen_events.write(InitialMeshGenEvent);
+	// 8. Spawn scale reference poles
+	spawn_scale_reference_poles(&mut commands, &mut meshes, &mut materials);
 
-  info!("[NoiseLod] Scene setup complete - generating initial meshes...");
+	// 9. Trigger initial mesh generation for starting leaves
+	initial_gen_events.write(InitialMeshGenEvent);
+
+	info!("[NoiseLod] Scene setup complete - generating initial meshes...");
 }
 
 /// System to generate meshes for initial leaves (runs once at startup).
 fn initial_mesh_gen(
-  mut events: MessageReader<InitialMeshGenEvent>,
-  mut async_state: ResMut<AsyncRefinementState>,
-  world_roots: Query<&VoxelWorldRoot>,
-  settings: Res<UiSettings>,
+	mut events: MessageReader<InitialMeshGenEvent>,
+	mut async_state: ResMut<AsyncRefinementState>,
+	world_roots: Query<&VoxelWorldRoot>,
+	settings: Res<UiSettings>,
 ) {
-  if events.read().next().is_none() {
-    return;
-  }
+	if events.read().next().is_none() {
+		return;
+	}
 
-  // Don't start if already processing
-  if async_state.pipeline.is_busy() {
-    info!("[InitialGen] Pipeline busy, skipping");
-    return;
-  }
+	// Don't start if already processing
+	if async_state.initial_pipeline.is_busy() {
+		info!("[InitialGen] Pipeline busy, skipping");
+		return;
+	}
 
-  let Ok(world_root) = world_roots.single() else {
-    warn!("[InitialGen] VoxelWorldRoot not found");
-    return;
-  };
+	let Ok(world_root) = world_roots.single() else {
+		warn!("[InitialGen] VoxelWorldRoot not found");
+		return;
+	};
 
-  let world_id = world_root.id();
-  let config = world_root.config().clone();
-  let leaves = world_root.world.leaves.as_set().clone();
+	let world_id = world_root.id();
+	let config = world_root.config().clone();
+	let leaves = world_root.world.leaves.as_set().clone();
 
-  // Create a "fake" transition that adds all initial leaves
-  // This tricks the async pipeline into generating meshes for them
-  let initial_nodes: SmallVec<[OctreeNode; 8]> = leaves.iter().copied().collect();
-  let transition = TransitionGroup {
-    transition_type: TransitionType::Subdivide,
-    group_key: OctreeNode::new(0, 0, 0, INITIAL_LOD + 1), // Dummy parent
-    nodes_to_remove: SmallVec::new(),
-    nodes_to_add: initial_nodes,
-  };
+	// Create a "fake" transition that adds all initial leaves
+	// This tricks the async pipeline into generating meshes for them
+	let initial_nodes: SmallVec<[OctreeNode; 8]> = leaves.iter().copied().collect();
+	let initial_lod = config.suggest_initial_lod();
+	let transition = TransitionGroup {
+		transition_type: TransitionType::Subdivide,
+		group_key: OctreeNode::new(0, 0, 0, initial_lod + 1), // Dummy parent
+		nodes_to_remove: SmallVec::new(),
+		nodes_to_add: initial_nodes,
+	};
 
-  info!(
-    "[InitialGen] Starting async generation for {} leaves",
-    leaves.len()
-  );
+	info!(
+		"[InitialGen] Starting async generation for {} leaves",
+		leaves.len()
+	);
 
-  // Create sampler and start async processing
-  let sampler = FastNoise2Terrain::new(settings.current_seed);
+	// Create sampler and start async processing (uses old pipeline for initial gen)
+	let started = match settings.sampler_source {
+		SamplerSource::FastNoise2 => {
+			let sampler = FastNoise2Terrain::new(settings.current_seed);
+			async_state
+				.initial_pipeline
+				.start(world_id, vec![transition], sampler, leaves, config)
+		}
+		SamplerSource::SimdNoise => {
+			let sampler = SimdNoiseTerrain::new(settings.current_seed);
+			async_state
+				.initial_pipeline
+				.start(world_id, vec![transition], sampler, leaves, config)
+		}
+	};
 
-  let started =
-    async_state
-      .pipeline
-      .start(world_id, vec![transition], sampler, leaves, config);
+	if started {
+		// Enable continuous refinement after initial gen completes
+		async_state.continuous = true;
+	} else {
+		warn!("[InitialGen] Failed to start pipeline");
+	}
+}
 
-  if started {
-    // Enable continuous refinement after initial gen completes
-    async_state.continuous = true;
-  } else {
-    warn!("[InitialGen] Failed to start pipeline");
-  }
+/// System to poll for initial mesh generation completion.
+fn poll_initial_mesh_gen(
+	mut commands: Commands,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut async_state: ResMut<AsyncRefinementState>,
+	world_roots: Query<&VoxelWorldRoot>,
+	settings: Res<UiSettings>,
+	lod_materials: Option<Res<LodMaterials>>,
+	mut chunk_map: Option<ResMut<ChunkEntityMap>>,
+	mut world_chunk_map: ResMut<WorldChunkMap>,
+) {
+	// Poll for events (non-blocking)
+	let Some(events) = async_state.initial_pipeline.poll_events() else {
+		return;
+	};
+
+	let Some(lod_materials) = lod_materials else {
+		warn!("LodMaterials not available");
+		return;
+	};
+
+	let Ok(world_root) = world_roots.single() else {
+		warn!("VoxelWorldRoot not found");
+		return;
+	};
+
+	let config = world_root.config().clone();
+	let use_lod_colors = settings.lod_colors_enabled;
+
+	// Process events - for initial gen, spawn immediately (no queue)
+	for event in events {
+		match event {
+			PipelineEvent::NodesExpired { .. } => {
+				// Initial gen has no expired nodes
+			}
+			PipelineEvent::ChunksReady {
+				world_id,
+				chunks: ready_chunks,
+			} => {
+				info!(
+					"[InitialGen] ChunksReady: {} chunks for world {:?}",
+					ready_chunks.len(),
+					world_id
+				);
+
+				let mut local_chunk_map = ChunkEntityMap::default();
+				let chunk_map_ref = if let Some(ref mut map) = chunk_map {
+					&mut **map
+				} else {
+					&mut local_chunk_map
+				};
+
+				for ready in ready_chunks {
+					if !world_root.world.leaves.contains(&ready.node) {
+						continue;
+					}
+
+					spawn_chunk_entity_with_marker(
+						&mut commands,
+						&mut meshes,
+						lod_materials.get(ready.node.lod, use_lod_colors),
+						chunk_map_ref,
+						&mut world_chunk_map,
+						world_id,
+						ready.node,
+						&ready.output,
+						&config,
+					);
+				}
+			}
+		}
+	}
 }
 
 /// Create per-LOD colored materials
@@ -367,12 +478,12 @@ fn setup_camera_and_lights(
   camera_query: &Query<Entity, With<crate::MainCamera>>,
 ) {
   // Configure existing main camera with FlyCamera and VoxelViewer
-  // Position camera above terrain (world_origin is at -500, -100, -500)
+  // Position camera above terrain (world is centered at origin, spans -50k to +50k)
   if let Ok(camera_entity) = camera_query.single() {
     // Position camera above terrain center, looking down at slight angle
-    // Terrain is at world_origin (-500, -100, -500), extends ~336 units per axis at LOD 4
-    let camera_pos = Vec3::new(-500.0, 200.0, -300.0);
-    let look_target = Vec3::new(-500.0, 0.0, -500.0);
+    // World extends ~100k units from origin; start near center
+    let camera_pos = Vec3::new(0.0, 2000.0, 5000.0);
+    let look_target = Vec3::new(0.0, 0.0, 0.0);
 
     // Calculate initial yaw/pitch from direction to target
     let dir = (look_target - camera_pos).normalize();
@@ -383,7 +494,7 @@ fn setup_camera_and_lights(
       Transform::from_translation(camera_pos)
         .with_rotation(Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)),
       fly_camera_input_bundle(FlyCamera {
-        speed: 100.0,
+        speed: 50.0,
         mouse_sensitivity: 0.003,
         gamepad_sensitivity: 2.0,
         yaw,
@@ -404,12 +515,90 @@ fn setup_camera_and_lights(
     SceneEntity,
   ));
 
-  // Ambient light
-  commands.insert_resource(GlobalAmbientLight {
-    color: Color::srgb(0.6, 0.7, 0.8),
-    brightness: 200.0,
-    affects_lightmapped_meshes: false,
-  });
+	// Ambient light
+	commands.insert_resource(GlobalAmbientLight {
+		color: Color::srgb(0.6, 0.7, 0.8),
+		brightness: 200.0,
+		affects_lightmapped_meshes: false,
+	});
+}
+
+/// Number of scale reference poles to spawn
+const NUM_SCALE_POLES: usize = 50;
+
+/// Scale pole dimensions - visible at world scale
+/// 100 units wide, 2000 units tall (same height as camera)
+const POLE_WIDTH: f32 = 100.0;
+const POLE_HEIGHT: f32 = 2000.0;
+
+/// Spawn scale reference poles as "pins" scattered across the world
+fn spawn_scale_reference_poles(
+	commands: &mut Commands,
+	meshes: &mut Assets<Mesh>,
+	materials: &mut Assets<StandardMaterial>,
+) {
+	// Create shared mesh and material for all poles
+	let pole_mesh = meshes.add(Cuboid::new(POLE_WIDTH, POLE_HEIGHT, POLE_WIDTH));
+	let pole_material = materials.add(StandardMaterial {
+		base_color: Color::srgb(1.0, 0.3, 0.1), // Bright orange-red for visibility
+		perceptual_roughness: 0.3,
+		metallic: 0.8,
+		emissive: LinearRgba::new(0.5, 0.15, 0.05, 1.0), // Slight glow for visibility
+		..default()
+	});
+
+	// Use seeded RNG for reproducible positions
+	let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+
+	// Spawn poles at random positions within world bounds
+	// Use smaller range so some are visible near camera start position
+	let spawn_range = 20000.0_f32; // Spawn within 20k units of origin
+
+	for i in 0..NUM_SCALE_POLES {
+		let x = rng.random_range(-spawn_range..spawn_range);
+		let z = rng.random_range(-spawn_range..spawn_range);
+		// Position so pole extends from Y=0 up to Y=POLE_HEIGHT
+		let y = POLE_HEIGHT / 2.0;
+
+		commands.spawn((
+			Mesh3d(pole_mesh.clone()),
+			MeshMaterial3d(pole_material.clone()),
+			Transform::from_translation(Vec3::new(x, y, z)),
+			SceneEntity,
+		));
+
+		// Log a few positions for debugging
+		if i < 5 {
+			info!("[NoiseLod] Scale pole {} at ({:.0}, {:.0}, {:.0})", i, x, y, z);
+		}
+	}
+
+	// Spawn a few poles near the camera start position for immediate visibility
+	// Camera starts at (0, 2000, 5000)
+	let nearby_positions = [
+		Vec3::new(500.0, POLE_HEIGHT / 2.0, 4000.0),   // In front of camera
+		Vec3::new(-500.0, POLE_HEIGHT / 2.0, 4000.0),  // In front of camera
+		Vec3::new(0.0, POLE_HEIGHT / 2.0, 3000.0),     // Closer
+		Vec3::new(1000.0, POLE_HEIGHT / 2.0, 2000.0),  // To the side
+		Vec3::new(-1000.0, POLE_HEIGHT / 2.0, 2000.0), // To the other side
+	];
+
+	for (i, pos) in nearby_positions.iter().enumerate() {
+		commands.spawn((
+			Mesh3d(pole_mesh.clone()),
+			MeshMaterial3d(pole_material.clone()),
+			Transform::from_translation(*pos),
+			SceneEntity,
+		));
+		info!("[NoiseLod] Nearby pole {} at ({:.0}, {:.0}, {:.0})", i, pos.x, pos.y, pos.z);
+	}
+
+	info!(
+		"[NoiseLod] Spawned {} scale reference poles ({} random + {} nearby)",
+		NUM_SCALE_POLES + nearby_positions.len(),
+		NUM_SCALE_POLES,
+		nearby_positions.len()
+	);
 }
 
 // =============================================================================
@@ -455,11 +644,16 @@ fn ui_controls(
       ui.separator();
 
       // Async refinement status
-      let is_processing = async_state.pipeline.is_busy();
+      let is_refining = async_state.refinement_pipeline.is_busy();
+      let pending_groups = async_state.entity_queue.pending_count();
+      let has_pending = pending_groups > 0;
+
       ui.horizontal(|ui| {
         ui.label("Status:");
-        if is_processing {
-          ui.colored_label(egui::Color32::YELLOW, "Processing...");
+        if is_refining {
+          ui.colored_label(egui::Color32::YELLOW, "Refining...");
+        } else if has_pending {
+          ui.colored_label(egui::Color32::LIGHT_BLUE, format!("Applying ({} groups)", pending_groups));
         } else {
           ui.colored_label(egui::Color32::GREEN, "Idle");
         }
@@ -468,7 +662,7 @@ fn ui_controls(
       ui.horizontal(|ui| {
         ui.checkbox(&mut async_state.continuous, "Continuous");
         if ui
-          .add_enabled(!is_processing, egui::Button::new("Refine LOD"))
+          .add_enabled(!is_refining && !has_pending, egui::Button::new("Refine LOD"))
           .clicked()
         {
           refine_events.write(RefineWorldEvent);
@@ -510,6 +704,11 @@ fn ui_controls(
               &mut settings.sampler_source,
               SamplerSource::FastNoise2,
               "FastNoise2",
+            );
+            ui.selectable_value(
+              &mut settings.sampler_source,
+              SamplerSource::SimdNoise,
+              "SimdNoise",
             );
           });
       });
@@ -597,6 +796,7 @@ fn rebuild_world(
   // (Arc)
   let sampler: Arc<dyn voxel_plugin::pipeline::VolumeSampler> = match event.sampler_source {
     SamplerSource::FastNoise2 => Arc::new(FastNoise2Terrain::new(event.seed)),
+    SamplerSource::SimdNoise => Arc::new(SimdNoiseTerrain::new(event.seed)),
   };
 
   // Update the world's sampler with the new noise source
@@ -670,216 +870,284 @@ fn rebuild_world(
 // =============================================================================
 
 /// Throttle continuous refinement to this many frames between checks.
-const CONTINUOUS_REFINEMENT_INTERVAL: u32 = 15;
+/// Lower = more responsive but more CPU overhead.
+const CONTINUOUS_REFINEMENT_INTERVAL: u32 = 5;
 
 /// System to start refinement when triggered by message.
 ///
-/// This kicks off async mesh generation on background threads (via rayon).
-/// The poll_async_refinement system handles completion.
+/// This kicks off async refinement + mesh generation on background threads.
+/// The poll_refinement_results system handles completion and queues entity ops.
 fn start_refinement(
-  mut refine_events: MessageReader<RefineWorldEvent>,
-  mut async_state: ResMut<AsyncRefinementState>,
-  viewers: Query<&GlobalTransform, With<VoxelViewer>>,
-  mut world_roots: Query<&mut VoxelWorldRoot>,
-  settings: Res<UiSettings>,
+	mut refine_events: MessageReader<RefineWorldEvent>,
+	mut async_state: ResMut<AsyncRefinementState>,
+	viewers: Query<&GlobalTransform, With<VoxelViewer>>,
+	world_roots: Query<&VoxelWorldRoot>,
+	settings: Res<UiSettings>,
 ) {
-  if refine_events.read().next().is_none() {
-    return;
-  }
+	if refine_events.read().next().is_none() {
+		return;
+	}
 
-  // Don't start new refinement if one is in progress
-  if async_state.pipeline.is_busy() {
-    info!("[Refine] Already processing, skipping");
-    return;
-  }
+	// Don't start new refinement if one is in progress
+	if async_state.refinement_pipeline.is_busy() {
+		return;
+	}
 
-  let Ok(mut world_root) = world_roots.single_mut() else {
-    warn!("VoxelWorldRoot not found");
-    return;
-  };
+	let Ok(world_root) = world_roots.single() else {
+		warn!("VoxelWorldRoot not found");
+		return;
+	};
 
-  // Get viewer position
-  let viewer_pos = viewers
-    .iter()
-    .next()
-    .map(|t| {
-      let p = t.translation();
-      DVec3::new(p.x as f64, p.y as f64, p.z as f64)
-    })
-    .unwrap_or(DVec3::new(0.0, 50.0, 0.0));
+	// Get viewer position
+	let viewer_pos = viewers
+		.iter()
+		.next()
+		.map(|t| {
+			let p = t.translation();
+			DVec3::new(p.x as f64, p.y as f64, p.z as f64)
+		})
+		.unwrap_or(DVec3::new(0.0, 50.0, 0.0));
 
-  let config = world_root.config().clone();
+	let world_id = world_root.id();
+	let config = world_root.config().clone();
+	let leaves = world_root.world.leaves.as_set().clone();
 
-  // Run octree refinement (this is CPU-bound but fast)
-  let input = RefinementInput {
-    viewer_pos,
-    config: config.clone(),
-    prev_leaves: world_root.world.leaves.as_set().clone(),
-    budget: RefinementBudget::DEFAULT,
-  };
+	// Aggressive collapse budget for responsive zoom-out
+	let budget = RefinementBudget {
+		max_subdivisions: 32,
+		max_collapses: 128, // 4x more collapses - they're cheap (8 meshes -> 1)
+		..RefinementBudget::DEFAULT
+	};
 
-  let output = refine(input);
+	// Start async refinement + mesh generation (non-blocking)
+	// Both refine() and process_transitions() run on background thread
+	let started = match settings.sampler_source {
+		SamplerSource::FastNoise2 => {
+			let sampler = FastNoise2Terrain::new(settings.current_seed);
+			async_state.refinement_pipeline.start(RefinementRequest {
+				world_id,
+				viewer_pos,
+				leaves,
+				config,
+				budget,
+				sampler,
+			})
+		}
+		SamplerSource::SimdNoise => {
+			let sampler = SimdNoiseTerrain::new(settings.current_seed);
+			async_state.refinement_pipeline.start(RefinementRequest {
+				world_id,
+				viewer_pos,
+				leaves,
+				config,
+				budget,
+				sampler,
+			})
+		}
+	};
 
-  if output.transition_groups.is_empty() {
-    return;
-  }
-
-  let world_id = world_root.id();
-
-  // Apply transitions to world state immediately
-  for group in &output.transition_groups {
-    for node in &group.nodes_to_remove {
-      world_root.world.leaves.remove(node);
-    }
-    for node in &group.nodes_to_add {
-      world_root.world.leaves.insert(*node);
-    }
-  }
-
-  // Create sampler and start async processing
-  let sampler = FastNoise2Terrain::new(settings.current_seed);
-  let leaves = world_root.world.leaves.as_set().clone();
-  let transitions = output.transition_groups;
-
-  // Start async mesh generation (non-blocking)
-  // Pipeline stores nodes_to_remove and emits them in poll_events()
-  let started = async_state
-    .pipeline
-    .start(world_id, transitions, sampler, leaves, config);
-
-  if !started {
-    // Should not happen - pipeline.is_busy() check at function start prevents this.
-    warn!("[Refine] pipeline.start() returned false unexpectedly - state may be inconsistent");
-  }
+	if !started {
+		warn!("[Refine] Failed to start refinement pipeline");
+	}
 }
 
-/// System to poll for async refinement completion and spawn entities.
-fn poll_async_refinement(
-  mut commands: Commands,
-  mut meshes: ResMut<Assets<Mesh>>,
-  mut async_state: ResMut<AsyncRefinementState>,
-  world_roots: Query<&VoxelWorldRoot>,
-  chunks: Query<(Entity, &VoxelChunk)>,
-  settings: Res<UiSettings>,
-  lod_materials: Option<Res<LodMaterials>>,
-  mut chunk_map: Option<ResMut<ChunkEntityMap>>,
-  mut world_chunk_map: ResMut<WorldChunkMap>,
+/// System to poll for async refinement completion.
+///
+/// When refinement completes:
+/// 1. Apply transitions to world.leaves (fast HashSet ops)
+/// 2. Queue transition groups for atomic entity application
+/// 3. Record metrics (if enabled)
+fn poll_refinement_results(
+	mut async_state: ResMut<AsyncRefinementState>,
+	mut world_roots: Query<&mut VoxelWorldRoot>,
+	mut metrics: ResMut<VoxelMetricsResource>,
 ) {
-  // Poll for events (non-blocking)
-  let Some(events) = async_state.pipeline.poll_events() else {
-    return;
-  };
+	// Poll for results (non-blocking)
+	let Some(result) = async_state.refinement_pipeline.poll_results() else {
+		return;
+	};
 
-  info!("[Poll] Received {} events from pipeline", events.len());
+	let Ok(mut world_root) = world_roots.single_mut() else {
+		warn!("VoxelWorldRoot not found");
+		return;
+	};
 
-  let Some(lod_materials) = lod_materials else {
-    warn!("LodMaterials not available");
-    return;
-  };
+	// Apply transitions to world.leaves (fast HashSet operations)
+	for transition in &result.transitions {
+		for node in &transition.nodes_to_remove {
+			world_root.world.leaves.remove(node);
+		}
+		for node in &transition.nodes_to_add {
+			world_root.world.leaves.insert(*node);
+		}
+	}
 
-  let Ok(world_root) = world_roots.single() else {
-    warn!("VoxelWorldRoot not found");
-    return;
-  };
+	// Record refinement stats
+	metrics.record_refinement_stats(result.stats.refine_us, result.stats.mesh_us);
 
-  let config = world_root.config().clone();
-  let use_lod_colors = settings.lod_colors_enabled;
+	// Queue transition groups for atomic entity application
+	// Each group will be applied atomically (despawn + spawn in same frame)
+	let num_transitions = result.transitions.len();
+	async_state.entity_queue.queue_transitions(result.transitions);
 
-  // Process events in order (NodesExpired before ChunksReady)
-  for event in events {
-    match event {
-      PipelineEvent::NodesExpired { world_id, nodes } => {
-        // Build node -> entity map for quick lookup
-        let node_to_entity: HashMap<OctreeNode, Entity> = chunks
-          .iter()
-          .filter(|(_, chunk)| chunk.world_id == world_id)
-          .map(|(entity, chunk)| (chunk.node, entity))
-          .collect();
+	if num_transitions > 0 {
+		info!(
+			"[Refine] Queued {} transition groups (refine: {}us, mesh: {}us)",
+			num_transitions, result.stats.refine_us, result.stats.mesh_us
+		);
+	}
+}
 
-        // Despawn expired nodes
-        for node in nodes {
-          if let Some(&entity) = node_to_entity.get(&node) {
-            commands.entity(entity).despawn();
-            if let Some(ref mut map) = chunk_map {
-              map.map.remove(&node);
-            }
-            world_chunk_map.remove(world_id, &node);
-          }
-        }
-      }
-      PipelineEvent::ChunksReady { world_id, chunks: ready_chunks } => {
-        info!(
-          "[Poll] ChunksReady: {} chunks for world {:?}",
-          ready_chunks.len(),
-          world_id
-        );
+/// System to process queued transition groups atomically.
+///
+/// Each transition group is applied completely (despawn + spawn) in the
+/// same frame to prevent visual pops.
+fn process_entity_queue(
+	mut commands: Commands,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut async_state: ResMut<AsyncRefinementState>,
+	world_roots: Query<&VoxelWorldRoot>,
+	chunks: Query<(Entity, &VoxelChunk)>,
+	settings: Res<UiSettings>,
+	lod_materials: Option<Res<LodMaterials>>,
+	mut chunk_map: Option<ResMut<ChunkEntityMap>>,
+	mut world_chunk_map: ResMut<WorldChunkMap>,
+	mut metrics: ResMut<VoxelMetricsResource>,
+) {
+	// Early exit if nothing queued
+	if !async_state.entity_queue.has_pending() {
+		return;
+	}
 
-        // Spawn new chunks - only spawn if node is still in world.leaves
-        // This guards against stale ready_chunks from async timing gaps
-        let mut local_chunk_map = ChunkEntityMap::default();
-        let chunk_map_ref = if let Some(ref mut map) = chunk_map {
-          &mut **map
-        } else {
-          &mut local_chunk_map
-        };
+	let Some(lod_materials) = lod_materials else {
+		return;
+	};
 
-        let mut skipped = 0;
-        let mut spawned = 0;
-        for ready in ready_chunks {
-          // Guard: only spawn if node is still a leaf (prevents orphan entities)
-          if !world_root.world.leaves.contains(&ready.node) {
-            skipped += 1;
-            continue;
-          }
-          spawned += 1;
+	let Ok(world_root) = world_roots.single() else {
+		return;
+	};
 
-          spawn_chunk_entity_with_marker(
-            &mut commands,
-            &mut meshes,
-            lod_materials.get(ready.node.lod, use_lod_colors),
-            chunk_map_ref,
-            &mut world_chunk_map,
-            world_id,
-            ready.node,
-            &ready.output,
-            &config,
-          );
-        }
+	let config = world_root.config().clone();
+	let world_id = world_root.id();
+	let use_lod_colors = settings.lod_colors_enabled;
 
-        info!("[Poll] Spawned {} chunks, skipped {}", spawned, skipped);
-        if skipped > 0 {
-          warn!(
-            "[Refine] Skipped {} stale nodes (no longer leaves)",
-            skipped
-          );
-        }
-      }
-    }
-  }
+	// Build node -> entity map for despawn lookups
+	let node_to_entity: HashMap<OctreeNode, Entity> = chunks
+		.iter()
+		.filter(|(_, chunk)| chunk.world_id == world_id)
+		.map(|(entity, chunk)| (chunk.node, entity))
+		.collect();
+
+	let mut local_chunk_map = ChunkEntityMap::default();
+	let chunk_map_ref = if let Some(ref mut map) = chunk_map {
+		&mut **map
+	} else {
+		&mut local_chunk_map
+	};
+
+	// Process transition groups atomically
+	let stats = async_state.entity_queue.process_frame(|transition| {
+		// Phase 1: Despawn old nodes (parent for subdivide, children for merge)
+		for node in &transition.nodes_to_remove {
+			if let Some(&entity) = node_to_entity.get(node) {
+				commands.entity(entity).despawn();
+				chunk_map_ref.map.remove(node);
+				world_chunk_map.remove(world_id, node);
+				// Record despawn metrics (approximate - we don't have vertex/index count here)
+				// For accurate metrics, we'd need to store these in the chunk component
+				metrics.record_chunk_despawn(node.lod, 0, 0);
+			}
+		}
+
+		// Phase 2: Spawn new chunks (same frame = no pop)
+		for ready in &transition.ready_chunks {
+			// Guard: only spawn if node is still a leaf
+			if !world_root.world.leaves.contains(&ready.node) {
+				continue;
+			}
+
+			// Record spawn metrics
+			metrics.record_chunk_spawn(
+				ready.node.lod,
+				ready.output.vertices.len() as u32,
+				ready.output.indices.len() as u32,
+			);
+
+			spawn_chunk_entity_with_marker(
+				&mut commands,
+				&mut meshes,
+				lod_materials.get(ready.node.lod, use_lod_colors),
+				chunk_map_ref,
+				&mut world_chunk_map,
+				world_id,
+				ready.node,
+				&ready.output,
+				&config,
+			);
+		}
+	});
+
+	// Log if there's still work remaining
+	if stats.pending_groups > 0 {
+		info!(
+			"[EntityQueue] Applied {} groups ({} despawns, {} spawns) in {}us. Remaining: {} groups",
+			stats.groups_applied, stats.despawns, stats.spawns, stats.elapsed_us,
+			stats.pending_groups
+		);
+	}
 }
 
 /// System for continuous automatic refinement based on viewer movement.
 fn continuous_refinement(
-  mut async_state: ResMut<AsyncRefinementState>,
-  mut refine_events: MessageWriter<RefineWorldEvent>,
+	mut async_state: ResMut<AsyncRefinementState>,
+	mut refine_events: MessageWriter<RefineWorldEvent>,
 ) {
-  if !async_state.continuous {
-    return;
-  }
+	if !async_state.continuous {
+		return;
+	}
 
-  // Don't trigger if already processing
-  if async_state.pipeline.is_busy() {
-    return;
-  }
+	// Don't trigger if refinement is already in progress
+	if async_state.refinement_pipeline.is_busy() {
+		return;
+	}
 
-  // Throttle check frequency
-  async_state.frames_since_check += 1;
-  if async_state.frames_since_check < CONTINUOUS_REFINEMENT_INTERVAL {
-    return;
-  }
-  async_state.frames_since_check = 0;
+	// Allow refinement to start even if entity queue has pending work
+	// This enables pipelining: process entities while computing next refinement
+	// Only block if queue is severely backed up (>32 groups)
+	if async_state.entity_queue.pending_count() > 32 {
+		return;
+	}
 
-  // Trigger refinement check
-  refine_events.write(RefineWorldEvent);
+	// Throttle check frequency
+	async_state.frames_since_check += 1;
+	if async_state.frames_since_check < CONTINUOUS_REFINEMENT_INTERVAL {
+		return;
+	}
+	async_state.frames_since_check = 0;
+
+	// Trigger refinement check
+	refine_events.write(RefineWorldEvent);
 }
 
+// =============================================================================
+// Debug UI
+// =============================================================================
+
+/// System to display voxel world metrics in an egui window.
+#[cfg(feature = "metrics")]
+fn voxel_debug_ui(
+	mut contexts: EguiContexts,
+	metrics: Res<VoxelMetricsResource>,
+) {
+	let Ok(ctx) = contexts.ctx_mut() else {
+		return;
+	};
+
+	egui::Window::new("Voxel Debug")
+		.default_open(false)
+		.anchor(egui::Align2::LEFT_TOP, [10.0, 60.0])
+		.resizable(true)
+		.show(ctx, |ui| {
+			voxel_metrics_ui(ui, &metrics.current);
+		});
+}

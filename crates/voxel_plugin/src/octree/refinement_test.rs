@@ -13,9 +13,9 @@ fn test_subdivide_produces_8_children() {
   leaves.insert(parent);
   let mut groups = Vec::new();
 
-  apply_subdivide(&parent, &mut leaves, &mut groups);
+	apply_subdivide(&parent, &mut leaves, &mut groups, None);
 
-  assert_eq!(leaves.len(), 8, "Should have 8 children after subdivide");
+	assert_eq!(leaves.len(), 8, "Should have 8 children after subdivide");
   for octant in 0..8u8 {
     let child = parent.get_child(octant).unwrap();
     assert!(
@@ -34,12 +34,12 @@ fn test_subdivide_removes_parent_from_leaves() {
   leaves.insert(parent);
   let mut groups = Vec::new();
 
-  apply_subdivide(&parent, &mut leaves, &mut groups);
+	apply_subdivide(&parent, &mut leaves, &mut groups, None);
 
-  assert!(
-    !leaves.contains(&parent),
-    "Parent should be removed after subdivide"
-  );
+	assert!(
+		!leaves.contains(&parent),
+		"Parent should be removed after subdivide"
+	);
 }
 
 /// Merge creates the parent node in leaves.
@@ -95,10 +95,10 @@ fn test_no_subdivide_at_min_lod() {
   leaves.insert(node);
   let mut groups = Vec::new();
 
-  let len_before = leaves.len();
-  apply_subdivide(&node, &mut leaves, &mut groups);
+	let len_before = leaves.len();
+	apply_subdivide(&node, &mut leaves, &mut groups, None);
 
-  // Should not change because LOD 0 cannot subdivide
+	// Should not change because LOD 0 cannot subdivide
   assert_eq!(leaves.len(), len_before, "LOD 0 node should not subdivide");
   assert!(groups.is_empty(), "No transition group for LOD 0 subdivide");
 }

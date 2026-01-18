@@ -77,9 +77,9 @@ impl VolumeSampler for NoiseSampler {
           // Simple 3D value noise using hash
           let value = hash_noise_3d(fx, fy, fz, self.seed);
 
-          // Scale to SDF range [-10, 10] then quantize
+          // Scale to SDF range then quantize
           let sdf = value * 10.0;
-          volume[idx] = sdf_conversion::to_storage(sdf as f32);
+          volume[idx] = sdf_conversion::to_storage(sdf as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }
@@ -162,7 +162,7 @@ impl VolumeSampler for TerrainSampler {
           };
 
           let final_sdf = terrain_sdf.max(-cave_sdf);
-          volume[idx] = sdf_conversion::to_storage(final_sdf as f32);
+          volume[idx] = sdf_conversion::to_storage(final_sdf as f32, voxel_size as f32);
 
           // Simple material based on depth
           let depth = self.surface_y - y;
@@ -227,7 +227,7 @@ impl VolumeSampler for SphereSampler {
           let dy = wy - self.center[1];
           let dz = wz - self.center[2];
           let dist = (dx * dx + dy * dy + dz * dz).sqrt() - self.radius;
-          volume[idx] = sdf_conversion::to_storage(dist as f32);
+          volume[idx] = sdf_conversion::to_storage(dist as f32, voxel_size as f32);
           materials[idx] = 0;
         }
       }

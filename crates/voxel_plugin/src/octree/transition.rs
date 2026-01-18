@@ -40,33 +40,61 @@ pub struct TransitionGroup {
 }
 
 impl TransitionGroup {
-  /// Create a subdivide transition: parent → 8 children.
-  pub fn new_subdivide(parent: OctreeNode) -> Option<Self> {
-    // Cannot subdivide at LOD 0
-    if parent.lod <= 0 {
-      return None;
-    }
+	/// Create a subdivide transition: parent → 8 children.
+	pub fn new_subdivide(parent: OctreeNode) -> Option<Self> {
+		// Cannot subdivide at LOD 0
+		if parent.lod <= 0 {
+			return None;
+		}
 
-    // Generate all 8 children
-    let nodes_to_add: SmallVec<[OctreeNode; 8]> = (0..8u8)
-      .filter_map(|octant| parent.get_child(octant))
-      .collect();
+		// Generate all 8 children
+		let nodes_to_add: SmallVec<[OctreeNode; 8]> = (0..8u8)
+			.filter_map(|octant| parent.get_child(octant))
+			.collect();
 
-    // Should have exactly 8 children
-    if nodes_to_add.len() != 8 {
-      return None;
-    }
+		// Should have exactly 8 children
+		if nodes_to_add.len() != 8 {
+			return None;
+		}
 
-    let mut nodes_to_remove = SmallVec::new();
-    nodes_to_remove.push(parent);
+		let mut nodes_to_remove = SmallVec::new();
+		nodes_to_remove.push(parent);
 
-    Some(Self {
-      transition_type: TransitionType::Subdivide,
-      group_key: parent,
-      nodes_to_add,
-      nodes_to_remove,
-    })
-  }
+		Some(Self {
+			transition_type: TransitionType::Subdivide,
+			group_key: parent,
+			nodes_to_add,
+			nodes_to_remove,
+		})
+	}
+
+	/// Create a subdivide transition with pre-filtered children.
+	///
+	/// Used when world bounds filtering reduces the child count below 8.
+	pub fn new_subdivide_filtered(
+		parent: OctreeNode,
+		children: SmallVec<[OctreeNode; 8]>,
+	) -> Option<Self> {
+		// Cannot subdivide at LOD 0
+		if parent.lod <= 0 {
+			return None;
+		}
+
+		// Must have at least 1 child
+		if children.is_empty() {
+			return None;
+		}
+
+		let mut nodes_to_remove = SmallVec::new();
+		nodes_to_remove.push(parent);
+
+		Some(Self {
+			transition_type: TransitionType::Subdivide,
+			group_key: parent,
+			nodes_to_add: children,
+			nodes_to_remove,
+		})
+	}
 
   /// Create a merge transition: 8 children → parent.
   ///

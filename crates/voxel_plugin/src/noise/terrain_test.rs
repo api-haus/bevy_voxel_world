@@ -11,14 +11,15 @@ use crate::pipeline::{sample_volume_for_node, VolumeSampler};
 /// Test edge coherency at voxel_size=1.0 through the full pipeline.
 #[test]
 fn test_terrain_edge_coherency_full_pipeline() {
-  let sampler = FastNoise2Terrain::new(1337);
-  let config = OctreeConfig {
-    voxel_size: 1.0,
-    world_origin: glam::DVec3::ZERO,
-    min_lod: 0,
-    max_lod: 6,
-    lod_exponent: 1.5,
-  };
+	let sampler = FastNoise2Terrain::new(1337);
+	let config = OctreeConfig {
+		voxel_size: 1.0,
+		world_origin: glam::DVec3::ZERO,
+		min_lod: 0,
+		max_lod: 6,
+		lod_exponent: 1.5,
+		world_bounds: None,
+	};
 
   // Sample two adjacent chunks in X
   let node_a = OctreeNode::new(0, 0, 0, 0);
@@ -71,21 +72,22 @@ fn test_terrain_edge_coherency_full_pipeline() {
 /// Test edge coherency at voxel_size=0.25 through the full pipeline.
 #[test]
 fn test_terrain_edge_coherency_small_voxel() {
-  let sampler = FastNoise2Terrain::new(1337);
-  let config = OctreeConfig {
-    voxel_size: 0.25,
-    world_origin: glam::DVec3::ZERO,
-    min_lod: 0,
-    max_lod: 6,
-    lod_exponent: 1.5,
-  };
+	let sampler = FastNoise2Terrain::new(1337);
+	let config = OctreeConfig {
+		voxel_size: 0.25,
+		world_origin: glam::DVec3::ZERO,
+		min_lod: 0,
+		max_lod: 6,
+		lod_exponent: 1.5,
+		world_bounds: None,
+	};
 
-  // Sample two adjacent chunks in X
-  let node_a = OctreeNode::new(0, 0, 0, 0);
-  let node_b = OctreeNode::new(1, 0, 0, 0);
+	// Sample two adjacent chunks in X
+	let node_a = OctreeNode::new(0, 0, 0, 0);
+	let node_b = OctreeNode::new(1, 0, 0, 0);
 
-  let sampled_a = sample_volume_for_node(&node_a, &sampler, &config);
-  let sampled_b = sample_volume_for_node(&node_b, &sampler, &config);
+	let sampled_a = sample_volume_for_node(&node_a, &sampler, &config);
+	let sampled_b = sample_volume_for_node(&node_b, &sampler, &config);
 
   // Compare overlapping edge samples
   let mut mismatches = 0;
@@ -128,13 +130,14 @@ fn test_terrain_edge_coherency_small_voxel() {
 /// Debug test: Print the world positions being sampled for adjacent chunks.
 #[test]
 fn test_debug_world_positions() {
-  let config = OctreeConfig {
-    voxel_size: 0.25,
-    world_origin: glam::DVec3::ZERO,
-    min_lod: 0,
-    max_lod: 6,
-    lod_exponent: 1.5,
-  };
+	let config = OctreeConfig {
+		voxel_size: 0.25,
+		world_origin: glam::DVec3::ZERO,
+		min_lod: 0,
+		max_lod: 6,
+		lod_exponent: 1.5,
+		world_bounds: None,
+	};
 
   let node_a = OctreeNode::new(0, 0, 0, 0);
   let node_b = OctreeNode::new(1, 0, 0, 0);

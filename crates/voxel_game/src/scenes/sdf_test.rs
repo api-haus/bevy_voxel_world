@@ -258,14 +258,15 @@ fn rebuild_meshes(
     commands.entity(entity).despawn();
   }
 
-  let sampler = settings.shape.create_sampler();
-  let config = OctreeConfig {
-    voxel_size: settings.voxel_size as f64,
-    world_origin: DVec3::ZERO,
-    min_lod: 0,
-    max_lod: 6,
-    lod_exponent: 1.5,
-  };
+	let sampler = settings.shape.create_sampler();
+	let config = OctreeConfig {
+		voxel_size: settings.voxel_size as f64,
+		world_origin: DVec3::ZERO,
+		min_lod: 0,
+		max_lod: 6,
+		lod_exponent: 1.5,
+		world_bounds: None,
+	};
 
   // Generate nodes in a grid
   let extent = settings.grid_extent;
