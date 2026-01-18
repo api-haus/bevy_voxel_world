@@ -8,6 +8,8 @@ voxel_plugin = { path = "../voxel_plugin" }
 bevy = { workspace = true }
 rayon = { workspace = true }
 smallvec = "1.13"
+# WASM compat: use web_time::Instant, NOT std::time::Instant
+web-time = "1.1"
 bevy_enhanced_input = "0.22"
 bevy_egui = { version = "0.39", optional = true }
 egui = { version = "0.33", optional = true }

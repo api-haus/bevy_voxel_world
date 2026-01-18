@@ -28,7 +28,8 @@
 //! ```
 
 use std::collections::VecDeque;
-use std::time::Instant;
+// WASM compat: std::time::Instant panics on wasm32
+use web_time::Instant;
 
 use voxel_plugin::pipeline::CompletedTransition;
 

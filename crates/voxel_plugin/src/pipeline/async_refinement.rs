@@ -208,6 +208,7 @@ impl Default for AsyncRefinementPipeline {
 #[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "pipeline::run_refinement_pipeline"))]
 fn run_refinement_pipeline<S: VolumeSampler>(request: RefinementRequest<S>) -> RefinementResult {
 	use std::collections::HashMap;
+	// WASM compat: std::time::Instant panics on wasm32
 	use web_time::Instant;
 
 	let RefinementRequest {

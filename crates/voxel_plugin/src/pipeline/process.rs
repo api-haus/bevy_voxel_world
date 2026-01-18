@@ -177,6 +177,7 @@ pub fn process_transitions_timed<S: VolumeSampler>(
   leaves: &HashSet<OctreeNode>,
   config: &OctreeConfig,
 ) -> (Vec<ReadyChunk>, ProcessingStats) {
+  // WASM compat: std::time::Instant panics on wasm32
   use web_time::Instant;
 
   let start = Instant::now();

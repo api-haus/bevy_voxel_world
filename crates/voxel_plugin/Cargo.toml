@@ -8,8 +8,8 @@ rayon = { workspace = true }
 crossbeam-channel = "0.5"
 glam = { version = "0.30", features = ["std"] }
 smallvec = "1.13"
+# WASM compat: use web_time::Instant, NOT std::time::Instant
 web-time = "1.1"
-simdnoise = "3.1"
 tracing = { version = "0.1", optional = true }
 
 [features]

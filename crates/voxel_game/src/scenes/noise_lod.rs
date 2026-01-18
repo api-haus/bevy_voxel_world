@@ -28,7 +28,7 @@ use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
 #[cfg(feature = "metrics")]
 use voxel_bevy::debug_ui::voxel_metrics_ui;
-use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain, SimdNoiseTerrain};
+use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
 use voxel_plugin::octree::{
 	DAabb3, OctreeConfig, OctreeNode, RefinementBudget, TransitionGroup, TransitionType,
 };
@@ -106,8 +106,6 @@ pub enum SamplerSource {
   /// FastNoise2 terrain with caves (native FFI or WASM JS bridge).
   #[default]
   FastNoise2,
-  /// Pure-Rust SIMD noise (no FFI required).
-  SimdNoise,
 }
 
 impl SamplerSource {
@@ -115,7 +113,6 @@ impl SamplerSource {
   pub fn name(&self) -> &'static str {
     match self {
       Self::FastNoise2 => "FastNoise2",
-      Self::SimdNoise => "SimdNoise",
     }
   }
 }
@@ -187,7 +184,6 @@ fn create_sampler(
 ) -> Box<dyn voxel_plugin::pipeline::VolumeSampler> {
   match sampler_source {
     SamplerSource::FastNoise2 => Box::new(FastNoise2Terrain::new(seed)),
-    SamplerSource::SimdNoise => Box::new(SimdNoiseTerrain::new(seed)),
   }
 }
 
@@ -315,12 +311,6 @@ fn initial_mesh_gen(
 	let started = match settings.sampler_source {
 		SamplerSource::FastNoise2 => {
 			let sampler = FastNoise2Terrain::new(settings.current_seed);
-			async_state
-				.initial_pipeline
-				.start(world_id, vec![transition], sampler, leaves, config)
-		}
-		SamplerSource::SimdNoise => {
-			let sampler = SimdNoiseTerrain::new(settings.current_seed);
 			async_state
 				.initial_pipeline
 				.start(world_id, vec![transition], sampler, leaves, config)
@@ -705,11 +695,6 @@ fn ui_controls(
               SamplerSource::FastNoise2,
               "FastNoise2",
             );
-            ui.selectable_value(
-              &mut settings.sampler_source,
-              SamplerSource::SimdNoise,
-              "SimdNoise",
-            );
           });
       });
 
@@ -796,7 +781,6 @@ fn rebuild_world(
   // (Arc)
   let sampler: Arc<dyn voxel_plugin::pipeline::VolumeSampler> = match event.sampler_source {
     SamplerSource::FastNoise2 => Arc::new(FastNoise2Terrain::new(event.seed)),
-    SamplerSource::SimdNoise => Arc::new(SimdNoiseTerrain::new(event.seed)),
   };
 
   // Update the world's sampler with the new noise source
@@ -924,17 +908,6 @@ fn start_refinement(
 	let started = match settings.sampler_source {
 		SamplerSource::FastNoise2 => {
 			let sampler = FastNoise2Terrain::new(settings.current_seed);
-			async_state.refinement_pipeline.start(RefinementRequest {
-				world_id,
-				viewer_pos,
-				leaves,
-				config,
-				budget,
-				sampler,
-			})
-		}
-		SamplerSource::SimdNoise => {
-			let sampler = SimdNoiseTerrain::new(settings.current_seed);
 			async_state.refinement_pipeline.start(RefinementRequest {
 				world_id,
 				viewer_pos,

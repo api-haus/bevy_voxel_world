@@ -23,9 +23,6 @@ mod terrain;
 mod terrain_test;
 pub use terrain::FastNoise2Terrain;
 
-// Pure-Rust simdnoise terrain sampler (no FFI required)
-mod simdnoise_terrain;
-pub use simdnoise_terrain::{NoiseType, SimdNoiseTerrain};
 
 // Re-export presets
 #[cfg(not(target_arch = "wasm32"))]
