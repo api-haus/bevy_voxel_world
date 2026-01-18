@@ -13,9 +13,10 @@ use voxel_plugin::world::WorldId;
 type DVec3 = bevy::math::DVec3;
 
 use crate::input::fly_camera_input_bundle;
-use crate::resources::{ChunkEntityMap, LodMaterials, OctreeLodState};
+use crate::resources::{ChunkEntityMap, LodMaterials, OctreeLodState, TerrainMaterial};
 use crate::systems::entities::spawn_chunk_entity;
 use crate::systems::meshing::compute_neighbor_mask;
+use crate::triplanar_material::{create_placeholder_material, TriplanarMaterial};
 use crate::FlyCamera;
 
 /// Initial LOD for octree (will refine from here).
@@ -29,6 +30,8 @@ pub fn setup_octree_scene(
   mut commands: Commands,
   mut meshes: ResMut<Assets<Mesh>>,
   mut materials: ResMut<Assets<StandardMaterial>>,
+  mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
+  mut images: ResMut<Assets<Image>>,
 ) {
   info!("Setting up octree scene...");
 
@@ -131,6 +134,13 @@ pub fn setup_octree_scene(
     }
   };
 
+  // 5b. Create triplanar terrain material with placeholder textures
+  let terrain_material = {
+    let mat = create_placeholder_material(&mut images);
+    let handle = triplanar_materials.add(mat);
+    TerrainMaterial { handle }
+  };
+
   // 6. Generate meshes for all leaves (parallel noise + meshing)
   let mut chunk_map = ChunkEntityMap::default();
 
@@ -195,6 +205,7 @@ pub fn setup_octree_scene(
   commands.insert_resource(OctreeLodState { leaves, config });
   commands.insert_resource(chunk_map);
   commands.insert_resource(lod_materials);
+  commands.insert_resource(terrain_material);
 
   // 8. Setup camera and lights
   setup_camera_and_lights(&mut commands);

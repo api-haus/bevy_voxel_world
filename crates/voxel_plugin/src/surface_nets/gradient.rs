@@ -44,6 +44,106 @@ pub fn compute(samples: &[f32; 8]) -> [f32; 3] {
   [normalized.x, normalized.y, normalized.z]
 }
 
+/// Compute interpolated gradient normal using vertex position within cell.
+///
+/// Instead of computing a single gradient for the entire cell, this computes
+/// gradients at each of the 8 corners using one-sided differences, then
+/// trilinearly interpolates to the vertex position. This eliminates stepping
+/// artifacts caused by cell-level gradients.
+///
+/// # Arguments
+/// * `samples` - 8 corner SDF samples (same layout as `compute`)
+/// * `frac` - Vertex position within cell as [0,1] fractions for x,y,z
+///
+/// # Corner gradient computation
+/// Each corner uses differences to its neighbors within the cell:
+/// - Corner 0 (0,0,0): forward differences (s1-s0, s2-s0, s4-s0)
+/// - Corner 7 (1,1,1): backward differences (s7-s6, s7-s5, s7-s3)
+/// - Mixed corners: appropriate one-sided differences
+#[inline]
+pub fn compute_interpolated(samples: &[f32; 8], frac: [f32; 3]) -> [f32; 3] {
+  // Compute gradient at each corner using one-sided differences
+  // Corner layout: bit 0 = X, bit 1 = Y, bit 2 = Z
+  let corner_gradients: [Vec3A; 8] = [
+    // Corner 0 (0,0,0): all forward
+    Vec3A::new(
+      samples[1] - samples[0],
+      samples[2] - samples[0],
+      samples[4] - samples[0],
+    ),
+    // Corner 1 (1,0,0): X backward, Y/Z forward
+    Vec3A::new(
+      samples[1] - samples[0],
+      samples[3] - samples[1],
+      samples[5] - samples[1],
+    ),
+    // Corner 2 (0,1,0): X forward, Y backward, Z forward
+    Vec3A::new(
+      samples[3] - samples[2],
+      samples[2] - samples[0],
+      samples[6] - samples[2],
+    ),
+    // Corner 3 (1,1,0): X/Y backward, Z forward
+    Vec3A::new(
+      samples[3] - samples[2],
+      samples[3] - samples[1],
+      samples[7] - samples[3],
+    ),
+    // Corner 4 (0,0,1): X/Y forward, Z backward
+    Vec3A::new(
+      samples[5] - samples[4],
+      samples[6] - samples[4],
+      samples[4] - samples[0],
+    ),
+    // Corner 5 (1,0,1): X/Z backward, Y forward
+    Vec3A::new(
+      samples[5] - samples[4],
+      samples[7] - samples[5],
+      samples[5] - samples[1],
+    ),
+    // Corner 6 (0,1,1): X forward, Y/Z backward
+    Vec3A::new(
+      samples[7] - samples[6],
+      samples[6] - samples[4],
+      samples[6] - samples[2],
+    ),
+    // Corner 7 (1,1,1): all backward
+    Vec3A::new(
+      samples[7] - samples[6],
+      samples[7] - samples[5],
+      samples[7] - samples[3],
+    ),
+  ];
+
+  // Trilinear interpolation weights
+  let [fx, fy, fz] = frac;
+  let fx1 = 1.0 - fx;
+  let fy1 = 1.0 - fy;
+  let fz1 = 1.0 - fz;
+
+  // Interpolate along X edges (4 pairs)
+  let g00 = corner_gradients[0] * fx1 + corner_gradients[1] * fx;
+  let g01 = corner_gradients[4] * fx1 + corner_gradients[5] * fx;
+  let g10 = corner_gradients[2] * fx1 + corner_gradients[3] * fx;
+  let g11 = corner_gradients[6] * fx1 + corner_gradients[7] * fx;
+
+  // Interpolate along Y (2 pairs)
+  let g0 = g00 * fy1 + g10 * fy;
+  let g1 = g01 * fy1 + g11 * fy;
+
+  // Interpolate along Z (final)
+  let gradient = g0 * fz1 + g1 * fz;
+
+  // Normalize
+  let len_sq = gradient.length_squared();
+  if len_sq < 1e-8 {
+    return [0.0, 1.0, 0.0]; // Fallback to up
+  }
+
+  let normalized = gradient * len_sq.sqrt().recip();
+  [normalized.x, normalized.y, normalized.z]
+}
+
 // =============================================================================
 // Geometry-based normal recalculation
 // =============================================================================
@@ -57,7 +157,10 @@ pub fn compute(samples: &[f32; 8]) -> [f32; 3] {
 ///
 /// Reference: Thürmer, G. & Wüthrich, C.A. (1998). Computing Vertex Normals
 /// from Polygonal Facets. Journal of Graphics Tools, 3(1), 43-46.
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all, name = "gradient::recalculate_from_geometry"))]
+#[cfg_attr(
+  feature = "tracing",
+  tracing::instrument(skip_all, name = "gradient::recalculate_from_geometry")
+)]
 pub fn recalculate_from_geometry(output: &mut MeshOutput) {
   // Reset all normals
   for vertex in &mut output.vertices {

@@ -9,6 +9,7 @@ pub mod fly_camera;
 pub mod input;
 pub mod resources;
 pub mod systems;
+pub mod triplanar_material;
 pub mod world;
 
 #[cfg(feature = "debug_ui")]
@@ -26,6 +27,13 @@ pub use entity_queue::{EntityQueue, EntityQueueConfig, QueueStats};
 pub use fly_camera::*;
 pub use input::{fly_camera_input_bundle, CameraInputContext, CameraInputPlugin};
 pub use resources::*;
+pub use systems::entities::{
+  mesh_output_to_bevy, spawn_chunk_entity, spawn_triplanar_chunk_entity, ATTRIBUTE_MATERIAL_WEIGHTS,
+};
+pub use triplanar_material::{
+  create_material_from_config, create_placeholder_material, LayerTextures, TerrainTextureConfig,
+  TriplanarMaterial, TriplanarMaterialPlugin, TriplanarParams, LAYER_COLORS,
+};
 pub use world::{VoxelWorldRoot, WorldChunkMap};
 
 // Re-export metrics types for convenience
@@ -35,9 +43,11 @@ pub use voxel_plugin::metrics::{WorldMetrics, RollingWindow};
 pub struct VoxelBevyPlugin;
 
 impl Plugin for VoxelBevyPlugin {
-	fn build(&self, app: &mut App) {
-		app.add_plugins(CameraInputPlugin)
-			.add_systems(Startup, systems::startup::setup_octree_scene);
-		// Note: fly_camera systems are registered by CameraInputPlugin
-	}
+  fn build(&self, app: &mut App) {
+    app
+      .add_plugins(CameraInputPlugin)
+      .add_plugins(TriplanarMaterialPlugin)
+      .add_systems(Startup, systems::startup::setup_octree_scene);
+    // Note: fly_camera systems are registered by CameraInputPlugin
+  }
 }

@@ -44,8 +44,6 @@ use super::{Scene, SceneEntity};
 /// Re-use DVec3 from bevy
 type DVec3 = bevy::math::DVec3;
 
-/// World size in units (100k x 100k x 100k centered at origin).
-const WORLD_HALF_EXTENT: f64 = 50000.0;
 
 /// Plugin for the noise LOD scene
 pub struct NoiseLodPlugin;
@@ -117,26 +115,57 @@ impl SamplerSource {
   }
 }
 
+/// Default world half-extent (50k units = 100k x 100k x 100k world).
+const DEFAULT_WORLD_HALF_EXTENT: f64 = 50000.0;
+
 /// UI settings resource for demo controls.
 #[derive(Resource)]
 struct UiSettings {
-  lod_colors_enabled: bool,
-  current_seed: i32,
-  prev_lod_colors_enabled: bool,
-  sampler_source: SamplerSource,
-  prev_sampler_source: SamplerSource,
+	lod_colors_enabled: bool,
+	current_seed: i32,
+	prev_lod_colors_enabled: bool,
+	sampler_source: SamplerSource,
+	prev_sampler_source: SamplerSource,
+
+	// World config parameters
+	voxel_size: f64,
+	world_half_extent: f64,
+	min_lod: i32,
+	max_lod: i32,
+	lod_exponent: f64,
+
+	// Previous values for change detection
+	prev_voxel_size: f64,
+	prev_world_half_extent: f64,
+	prev_min_lod: i32,
+	prev_max_lod: i32,
+	prev_lod_exponent: f64,
 }
 
 impl Default for UiSettings {
-  fn default() -> Self {
-    Self {
-      lod_colors_enabled: true,
-      current_seed: 1337,
-      prev_lod_colors_enabled: true,
-      sampler_source: SamplerSource::default(),
-      prev_sampler_source: SamplerSource::default(),
-    }
-  }
+	fn default() -> Self {
+		Self {
+			lod_colors_enabled: true,
+			current_seed: 1337,
+			prev_lod_colors_enabled: true,
+			sampler_source: SamplerSource::default(),
+			prev_sampler_source: SamplerSource::default(),
+
+			// World config defaults
+			voxel_size: 0.25,
+			world_half_extent: DEFAULT_WORLD_HALF_EXTENT,
+			min_lod: 0,
+			max_lod: 31,
+			lod_exponent: 1.0,
+
+			// Previous values (same as current initially)
+			prev_voxel_size: 0.25,
+			prev_world_half_extent: DEFAULT_WORLD_HALF_EXTENT,
+			prev_min_lod: 0,
+			prev_max_lod: 31,
+			prev_lod_exponent: 1.0,
+		}
+	}
 }
 
 /// Async refinement state resource.
@@ -205,27 +234,27 @@ fn setup(
 	mut materials: ResMut<Assets<StandardMaterial>>,
 	mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
 	camera_query: Query<Entity, With<crate::MainCamera>>,
+	settings: Res<UiSettings>,
 ) {
-  info!("[NoiseLod] Setting up octree scene (async)...");
+	info!("[NoiseLod] Setting up octree scene (async)...");
 
 	// 1. Create terrain sampler (using default settings)
-	let default_settings = UiSettings::default();
-	let sampler = create_sampler(default_settings.sampler_source, default_settings.current_seed);
+	let sampler = create_sampler(settings.sampler_source, settings.current_seed);
 
-	// 2. Create world bounds (100k x 100k x 100k cube centered at origin)
+	// 2. Create world bounds from settings
+	let world_half_extent = settings.world_half_extent;
 	let world_bounds = DAabb3::from_center_half_extents(
 		DVec3::ZERO,
-		DVec3::new(WORLD_HALF_EXTENT, WORLD_HALF_EXTENT, WORLD_HALF_EXTENT),
+		DVec3::new(world_half_extent, world_half_extent, world_half_extent),
 	);
 
-	// 3. Create octree configuration with world bounds
-	// Cell size at LOD 0 = 0.25 * 28 = 7 units
+	// 3. Create octree configuration with world bounds from settings
 	let config = OctreeConfig {
-		voxel_size: 0.25,
-		world_origin: DVec3::new(-WORLD_HALF_EXTENT, -WORLD_HALF_EXTENT, -WORLD_HALF_EXTENT),
-		min_lod: 0,
-		max_lod: 31,
-		lod_exponent: 2.0,
+		voxel_size: settings.voxel_size,
+		world_origin: DVec3::new(-world_half_extent, -world_half_extent, -world_half_extent),
+		min_lod: settings.min_lod,
+		max_lod: settings.max_lod,
+		lod_exponent: settings.lod_exponent,
 		world_bounds: Some(world_bounds),
 	};
 
@@ -616,97 +645,181 @@ fn instructions_ui(mut contexts: EguiContexts) {
 
 /// UI controls panel
 fn ui_controls(
-  mut contexts: EguiContexts,
-  mut settings: ResMut<UiSettings>,
-  mut async_state: ResMut<AsyncRefinementState>,
-  mut rebuild_events: MessageWriter<RebuildWorldEvent>,
-  mut refine_events: MessageWriter<RefineWorldEvent>,
+	mut contexts: EguiContexts,
+	mut settings: ResMut<UiSettings>,
+	mut async_state: ResMut<AsyncRefinementState>,
+	mut rebuild_events: MessageWriter<RebuildWorldEvent>,
+	mut refine_events: MessageWriter<RefineWorldEvent>,
 ) {
-  let Ok(ctx) = contexts.ctx_mut() else {
-    return;
-  };
-  egui::Window::new("Controls")
-    .anchor(egui::Align2::RIGHT_TOP, [-10.0, 60.0])
-    .resizable(false)
-    .show(ctx, |ui| {
-      ui.checkbox(&mut settings.lod_colors_enabled, "LOD Colors");
+	let Ok(ctx) = contexts.ctx_mut() else {
+		return;
+	};
+	egui::Window::new("Controls")
+		.anchor(egui::Align2::RIGHT_TOP, [-10.0, 60.0])
+		.resizable(false)
+		.show(ctx, |ui| {
+			ui.checkbox(&mut settings.lod_colors_enabled, "LOD Colors");
 
-      ui.separator();
+			ui.separator();
 
-      // Async refinement status
-      let is_refining = async_state.refinement_pipeline.is_busy();
-      let pending_groups = async_state.entity_queue.pending_count();
-      let has_pending = pending_groups > 0;
+			// Async refinement status
+			let is_refining = async_state.refinement_pipeline.is_busy();
+			let pending_groups = async_state.entity_queue.pending_count();
+			let has_pending = pending_groups > 0;
 
-      ui.horizontal(|ui| {
-        ui.label("Status:");
-        if is_refining {
-          ui.colored_label(egui::Color32::YELLOW, "Refining...");
-        } else if has_pending {
-          ui.colored_label(egui::Color32::LIGHT_BLUE, format!("Applying ({} groups)", pending_groups));
-        } else {
-          ui.colored_label(egui::Color32::GREEN, "Idle");
-        }
-      });
+			ui.horizontal(|ui| {
+				ui.label("Status:");
+				if is_refining {
+					ui.colored_label(egui::Color32::YELLOW, "Refining...");
+				} else if has_pending {
+					ui.colored_label(
+						egui::Color32::LIGHT_BLUE,
+						format!("Applying ({} groups)", pending_groups),
+					);
+				} else {
+					ui.colored_label(egui::Color32::GREEN, "Idle");
+				}
+			});
 
-      ui.horizontal(|ui| {
-        ui.checkbox(&mut async_state.continuous, "Continuous");
-        if ui
-          .add_enabled(!is_refining && !has_pending, egui::Button::new("Refine LOD"))
-          .clicked()
-        {
-          refine_events.write(RefineWorldEvent);
-        }
-      });
+			ui.horizontal(|ui| {
+				ui.checkbox(&mut async_state.continuous, "Continuous");
+				if ui
+					.add_enabled(!is_refining && !has_pending, egui::Button::new("Refine LOD"))
+					.clicked()
+				{
+					refine_events.write(RefineWorldEvent);
+				}
+			});
 
-      ui.separator();
+			ui.separator();
 
-      ui.horizontal(|ui| {
-        ui.label("Seed:");
-        ui.add(egui::DragValue::new(&mut settings.current_seed));
-      });
+			ui.horizontal(|ui| {
+				ui.label("Seed:");
+				ui.add(egui::DragValue::new(&mut settings.current_seed));
+			});
 
-      if ui.button("Rebuild World").clicked() {
-        rebuild_events.write(RebuildWorldEvent {
-          seed: settings.current_seed,
-          sampler_source: settings.sampler_source,
-        });
-      }
+			if ui.button("Rebuild World").clicked() {
+				rebuild_events.write(RebuildWorldEvent {
+					seed: settings.current_seed,
+					sampler_source: settings.sampler_source,
+				});
+			}
 
-      if ui.button("Random Seed").clicked() {
-        let new_seed = rand::rng().random::<i32>();
-        settings.current_seed = new_seed;
-        rebuild_events.write(RebuildWorldEvent {
-          seed: new_seed,
-          sampler_source: settings.sampler_source,
-        });
-      }
+			if ui.button("Random Seed").clicked() {
+				let new_seed = rand::rng().random::<i32>();
+				settings.current_seed = new_seed;
+				rebuild_events.write(RebuildWorldEvent {
+					seed: new_seed,
+					sampler_source: settings.sampler_source,
+				});
+			}
 
-      ui.separator();
+			ui.separator();
 
-      // Noise source selection
-      ui.horizontal(|ui| {
-        ui.label("Noise:");
-        egui::ComboBox::from_id_salt("sampler_source")
-          .selected_text(settings.sampler_source.name())
-          .show_ui(ui, |ui| {
-            ui.selectable_value(
-              &mut settings.sampler_source,
-              SamplerSource::FastNoise2,
-              "FastNoise2",
-            );
-          });
-      });
+			// Noise source selection
+			ui.horizontal(|ui| {
+				ui.label("Noise:");
+				egui::ComboBox::from_id_salt("sampler_source")
+					.selected_text(settings.sampler_source.name())
+					.show_ui(ui, |ui| {
+						ui.selectable_value(
+							&mut settings.sampler_source,
+							SamplerSource::FastNoise2,
+							"FastNoise2",
+						);
+					});
+			});
 
-      // Auto-rebuild if noise source changed
-      if settings.sampler_source != settings.prev_sampler_source {
-        settings.prev_sampler_source = settings.sampler_source;
-        rebuild_events.write(RebuildWorldEvent {
-          seed: settings.current_seed,
-          sampler_source: settings.sampler_source,
-        });
-      }
-    });
+			ui.separator();
+
+			// World parameters section
+			ui.collapsing("World Parameters", |ui| {
+				ui.horizontal(|ui| {
+					ui.label("Voxel Size:");
+					ui.add(
+						egui::DragValue::new(&mut settings.voxel_size)
+							.speed(0.01)
+							.range(0.01..=10.0)
+							.suffix(" units"),
+					);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("World Size:");
+					// Display as full extent (diameter), edit as half-extent internally
+					let mut world_size = settings.world_half_extent * 2.0;
+					if ui
+						.add(
+							egui::DragValue::new(&mut world_size)
+								.speed(1000.0)
+								.range(100.0..=1000000.0)
+								.suffix(" units"),
+						)
+						.changed()
+					{
+						settings.world_half_extent = world_size / 2.0;
+					}
+				});
+
+				// Read values before mutable borrows for range constraints
+				let max_lod_val = settings.max_lod;
+				let min_lod_val = settings.min_lod;
+
+				ui.horizontal(|ui| {
+					ui.label("Min LOD:");
+					ui.add(
+						egui::DragValue::new(&mut settings.min_lod)
+							.speed(1)
+							.range(0..=max_lod_val - 1),
+					);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("Max LOD:");
+					ui.add(
+						egui::DragValue::new(&mut settings.max_lod)
+							.speed(1)
+							.range(min_lod_val + 1..=31),
+					);
+				});
+
+				ui.horizontal(|ui| {
+					ui.label("LOD Exponent:");
+					ui.add(
+						egui::DragValue::new(&mut settings.lod_exponent)
+							.speed(0.1)
+							.range(0.0..=4.0),
+					);
+				});
+
+				// Show computed info
+				let base_cell_size = settings.voxel_size * 28.0; // VOXELS_PER_CELL = 28
+				ui.label(format!("Cell size (LOD 0): {:.2} units", base_cell_size));
+			});
+
+			// Check for world parameter changes and trigger rebuild
+			let world_params_changed = settings.voxel_size != settings.prev_voxel_size
+				|| settings.world_half_extent != settings.prev_world_half_extent
+				|| settings.min_lod != settings.prev_min_lod
+				|| settings.max_lod != settings.prev_max_lod
+				|| settings.lod_exponent != settings.prev_lod_exponent
+				|| settings.sampler_source != settings.prev_sampler_source;
+
+			if world_params_changed {
+				// Update previous values
+				settings.prev_voxel_size = settings.voxel_size;
+				settings.prev_world_half_extent = settings.world_half_extent;
+				settings.prev_min_lod = settings.min_lod;
+				settings.prev_max_lod = settings.max_lod;
+				settings.prev_lod_exponent = settings.lod_exponent;
+				settings.prev_sampler_source = settings.sampler_source;
+
+				rebuild_events.write(RebuildWorldEvent {
+					seed: settings.current_seed,
+					sampler_source: settings.sampler_source,
+				});
+			}
+		});
 }
 
 /// System to toggle LOD colors on/off
@@ -731,63 +844,84 @@ fn toggle_lod_colors(
 
 /// System to rebuild world when message is received
 fn rebuild_world(
-  mut commands: Commands,
-  mut rebuild_events: MessageReader<RebuildWorldEvent>,
-  mut meshes: ResMut<Assets<Mesh>>,
-  chunks: Query<Entity, With<VoxelChunk>>,
-  settings: Res<UiSettings>,
-  lod_materials: Option<Res<LodMaterials>>,
-  mut world_roots: Query<&mut VoxelWorldRoot>,
-  mut chunk_map: Option<ResMut<ChunkEntityMap>>,
-  mut world_chunk_map: ResMut<WorldChunkMap>,
+	mut commands: Commands,
+	mut rebuild_events: MessageReader<RebuildWorldEvent>,
+	mut meshes: ResMut<Assets<Mesh>>,
+	chunks: Query<Entity, With<VoxelChunk>>,
+	settings: Res<UiSettings>,
+	lod_materials: Option<Res<LodMaterials>>,
+	mut world_roots: Query<&mut VoxelWorldRoot>,
+	mut chunk_map: Option<ResMut<ChunkEntityMap>>,
+	mut world_chunk_map: ResMut<WorldChunkMap>,
 ) {
-  let Some(event) = rebuild_events.read().last() else {
-    return;
-  };
+	let Some(event) = rebuild_events.read().last() else {
+		return;
+	};
 
-  info!(
-    "[NoiseLod] Rebuilding world with seed: {}, noise: {:?}",
-    event.seed, event.sampler_source
-  );
+	info!(
+		"[NoiseLod] Rebuilding world with seed: {}, noise: {:?}",
+		event.seed, event.sampler_source
+	);
 
-  // Despawn all existing chunks
-  for entity in &chunks {
-    commands.entity(entity).despawn();
-  }
+	// Despawn all existing chunks
+	for entity in &chunks {
+		commands.entity(entity).despawn();
+	}
 
-  // Clear chunk map
-  if let Some(ref mut map) = chunk_map {
-    map.map.clear();
-  }
+	// Clear chunk map
+	if let Some(ref mut map) = chunk_map {
+		map.map.clear();
+	}
 
-  let Some(lod_materials) = lod_materials else {
-    warn!("LodMaterials not available");
-    return;
-  };
+	let Some(lod_materials) = lod_materials else {
+		warn!("LodMaterials not available");
+		return;
+	};
 
-  // Get the VoxelWorldRoot
-  let Ok(mut world_root) = world_roots.single_mut() else {
-    warn!("VoxelWorldRoot not found");
-    return;
-  };
+	// Get the VoxelWorldRoot
+	let Ok(mut world_root) = world_roots.single_mut() else {
+		warn!("VoxelWorldRoot not found");
+		return;
+	};
 
-  let world_id = world_root.id();
+	let world_id = world_root.id();
 
-  // Clear world chunks from WorldChunkMap
-  world_chunk_map.remove_world(world_id);
+	// Clear world chunks from WorldChunkMap
+	world_chunk_map.remove_world(world_id);
 
-  // Create new terrain sampler with the selected noise source
-  // We need two copies: one for world_root (owned) and one for parallel sampling
-  // (Arc)
-  let sampler: Arc<dyn voxel_plugin::pipeline::VolumeSampler> = match event.sampler_source {
-    SamplerSource::FastNoise2 => Arc::new(FastNoise2Terrain::new(event.seed)),
-  };
+	// Create new terrain sampler with the selected noise source
+	// We need two copies: one for world_root (owned) and one for parallel sampling (Arc)
+	let sampler: Arc<dyn voxel_plugin::pipeline::VolumeSampler> = match event.sampler_source {
+		SamplerSource::FastNoise2 => Arc::new(FastNoise2Terrain::new(event.seed)),
+	};
 
-  // Update the world's sampler with the new noise source
-  world_root.world.sampler = create_sampler(event.sampler_source, event.seed);
+	// Update the world's sampler with the new noise source
+	world_root.world.sampler = create_sampler(event.sampler_source, event.seed);
 
-  let config = world_root.config().clone();
-  let leaf_nodes: Vec<_> = world_root.world.leaves.iter().copied().collect();
+	// Create new config from current UI settings
+	let world_half_extent = settings.world_half_extent;
+	let world_bounds = DAabb3::from_center_half_extents(
+		DVec3::ZERO,
+		DVec3::new(world_half_extent, world_half_extent, world_half_extent),
+	);
+
+	let config = OctreeConfig {
+		voxel_size: settings.voxel_size,
+		world_origin: DVec3::new(-world_half_extent, -world_half_extent, -world_half_extent),
+		min_lod: settings.min_lod,
+		max_lod: settings.max_lod,
+		lod_exponent: settings.lod_exponent,
+		world_bounds: Some(world_bounds),
+	};
+
+	// Update world config and recompute leaves
+	world_root.world.config = config.clone();
+	let initial_lod = config.suggest_initial_lod();
+	let initial_leaves: std::collections::HashSet<_> =
+		config.compute_initial_leaves(initial_lod).into_iter().collect();
+	world_root.world.leaves = initial_leaves.into();
+
+	let leaf_nodes: Vec<_> = world_root.world.leaves.iter().copied().collect();
   let use_lod_colors = settings.lod_colors_enabled;
 
   // Parallel: sample noise and generate meshes

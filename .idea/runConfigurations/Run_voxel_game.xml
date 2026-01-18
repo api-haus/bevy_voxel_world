@@ -1,12 +1,9 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Run voxel_game" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="buildProfileId" value="dev" />
-    <option name="command" value="run --package voxel_game --bin voxel_game" />
+    <option name="command" value="run --package voxel_game --bin voxel_game --features dev,metrics,trace_tracy" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-    <envs>
-      <env name="FASTNOISE2_LIB_DIR" value="$PROJECT_DIR$/.fastnoise2-cache/lib" />
-      <env name="FASTNOISE2_BINDINGS_DIR" value="$PROJECT_DIR$/.fastnoise2-cache/bindings" />
-    </envs>
+    <envs />
     <option name="emulateTerminal" value="true" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="true" />

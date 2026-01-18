@@ -1,15 +1,22 @@
 //! Entity management for voxel chunks.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues};
 use bevy::prelude::*;
+use bevy::render::render_resource::VertexFormat;
 use voxel_plugin::octree::{OctreeConfig, OctreeNode};
 use voxel_plugin::types::MeshOutput;
 use voxel_plugin::world::WorldId;
 
 use crate::components::VoxelChunk;
 use crate::resources::ChunkEntityMap;
+use crate::triplanar_material::TriplanarMaterial;
 use crate::world::WorldChunkMap;
+
+/// Custom vertex attribute for material blend weights (4 floats).
+/// Used by triplanar shader for texture splatting.
+pub const ATTRIBUTE_MATERIAL_WEIGHTS: MeshVertexAttribute =
+  MeshVertexAttribute::new("MaterialWeights", 988540917, VertexFormat::Float32x4);
 
 /// Spawn a mesh entity for an octree node.
 ///
@@ -70,6 +77,48 @@ pub fn spawn_chunk_entity(
   entity
 }
 
+/// Spawn a mesh entity with triplanar material for an octree node.
+///
+/// Similar to `spawn_chunk_entity` but uses the triplanar PBR material
+/// for terrain texturing with 4-layer blending.
+pub fn spawn_triplanar_chunk_entity(
+  commands: &mut Commands,
+  meshes: &mut Assets<Mesh>,
+  material: Handle<TriplanarMaterial>,
+  chunk_map: &mut ChunkEntityMap,
+  world_chunk_map: Option<&mut WorldChunkMap>,
+  world_id: WorldId,
+  node: OctreeNode,
+  output: &MeshOutput,
+  config: &OctreeConfig,
+) -> Entity {
+  let mesh = mesh_output_to_bevy(output);
+  let mesh_handle = meshes.add(mesh);
+
+  let world_min = config.get_node_min(&node);
+  let voxel_size = config.get_voxel_size(node.lod) as f32;
+
+  let entity = commands
+    .spawn((
+      Mesh3d(mesh_handle),
+      MeshMaterial3d(material),
+      Transform::from_translation(Vec3::new(
+        world_min.x as f32,
+        world_min.y as f32,
+        world_min.z as f32,
+      ))
+      .with_scale(Vec3::splat(voxel_size)),
+      VoxelChunk { world_id, node },
+    ))
+    .id();
+
+  chunk_map.insert(node, entity);
+  if let Some(wcm) = world_chunk_map {
+    wcm.insert(world_id, node, entity);
+  }
+  entity
+}
+
 /// Despawn a chunk entity.
 #[allow(dead_code)]
 pub fn despawn_chunk_entity(
@@ -83,7 +132,7 @@ pub fn despawn_chunk_entity(
 }
 
 /// Convert voxel_plugin MeshOutput to Bevy Mesh.
-fn mesh_output_to_bevy(output: &MeshOutput) -> Mesh {
+pub fn mesh_output_to_bevy(output: &MeshOutput) -> Mesh {
   let mut mesh = Mesh::new(
     PrimitiveTopology::TriangleList,
     RenderAssetUsages::default(),
@@ -95,9 +144,15 @@ fn mesh_output_to_bevy(output: &MeshOutput) -> Mesh {
 
   let positions: Vec<[f32; 3]> = output.vertices.iter().map(|v| v.position).collect();
   let normals: Vec<[f32; 3]> = output.vertices.iter().map(|v| v.normal).collect();
+  let material_weights: Vec<[f32; 4]> =
+    output.vertices.iter().map(|v| v.material_weights).collect();
 
   mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
   mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+  mesh.insert_attribute(
+    ATTRIBUTE_MATERIAL_WEIGHTS,
+    VertexAttributeValues::Float32x4(material_weights),
+  );
   mesh.insert_indices(Indices::U32(output.indices.clone()));
 
   mesh

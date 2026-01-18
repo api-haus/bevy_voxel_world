@@ -363,6 +363,10 @@ fn compute_normals(
       // Compute gradient normals from cell corner samples
       compute_gradient_normals(volume, output);
     }
+    NormalMode::InterpolatedGradient => {
+      // Compute gradient normals interpolated to vertex position
+      compute_interpolated_gradient_normals(volume, output);
+    }
     NormalMode::Geometry => {
       // Compute normals from triangle geometry
       gradient::recalculate_from_geometry(output);
@@ -388,6 +392,31 @@ fn compute_gradient_normals(volume: &[SdfSample; SAMPLE_SIZE_CB], output: &mut M
       std::array::from_fn(|i| sdf_conversion::to_float(volume[base_idx + CORNER_OFFSETS[i]], 1.0));
 
     vertex.normal = gradient::compute(&samples);
+  }
+}
+
+/// Compute interpolated gradient normals using vertex position within cell.
+///
+/// Unlike `compute_gradient_normals` which produces the same normal for all
+/// vertices in a cell, this interpolates corner gradients to the actual vertex
+/// position, eliminating stepping artifacts.
+fn compute_interpolated_gradient_normals(
+  volume: &[SdfSample; SAMPLE_SIZE_CB],
+  output: &mut MeshOutput,
+) {
+  for vertex in &mut output.vertices {
+    let [cx, cy, cz] = vertex.cell_position;
+    let base_idx = coord_to_index(cx as usize, cy as usize, cz as usize);
+
+    // Load 8 corner samples
+    let samples: [f32; 8] =
+      std::array::from_fn(|i| sdf_conversion::to_float(volume[base_idx + CORNER_OFFSETS[i]], 1.0));
+
+    // Compute fractional position within cell [0, 1]
+    let [px, py, pz] = vertex.position;
+    let frac = [px - cx as f32, py - cy as f32, pz - cz as f32];
+
+    vertex.normal = gradient::compute_interpolated(&samples, frac);
   }
 }
 

@@ -8,7 +8,13 @@ pub type SdfSample = i8;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NormalMode {
   /// Gradient from cell corners (fast, consistent across chunks).
+  /// Uses cell-level gradient - same normal for all vertices in a cell.
   Gradient,
+
+  /// Interpolated gradient using vertex position within cell.
+  /// Computes gradient at each corner, then trilinearly interpolates
+  /// to the vertex position. Smoother than Gradient, no stepping artifacts.
+  InterpolatedGradient,
 
   /// Normals from triangle geometry (accurate interior, discontinuous at chunk
   /// edges).
@@ -25,9 +31,7 @@ pub enum NormalMode {
 
 impl Default for NormalMode {
   fn default() -> Self {
-    NormalMode::Blended {
-      blend_distance: 2.0,
-    }
+    NormalMode::InterpolatedGradient
   }
 }
 
@@ -44,7 +48,7 @@ pub type MaterialId = u8;
 /// providing smooth gradients for Surface Nets interpolation.
 pub mod sdf_conversion {
   /// SDF range in voxel units (how many voxels from surface we can represent).
-  pub const RANGE_VOXELS: f32 = 1.0;
+  pub const RANGE_VOXELS: f32 = 0.1;
 
   /// Base scale factor: 127 / RANGE_VOXELS = 12.7 levels per voxel
   pub const BASE_SCALE: f32 = 127.0 / RANGE_VOXELS;
