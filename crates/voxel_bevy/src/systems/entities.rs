@@ -1,9 +1,8 @@
 //! Entity management for voxel chunks.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues};
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::VertexFormat;
 use voxel_plugin::octree::{OctreeConfig, OctreeNode};
 use voxel_plugin::types::MeshOutput;
 use voxel_plugin::world::WorldId;
@@ -13,10 +12,9 @@ use crate::resources::ChunkEntityMap;
 use crate::triplanar_material::TriplanarMaterial;
 use crate::world::WorldChunkMap;
 
-/// Custom vertex attribute for material blend weights (4 floats).
-/// Used by triplanar shader for texture splatting.
-pub const ATTRIBUTE_MATERIAL_WEIGHTS: MeshVertexAttribute =
-  MeshVertexAttribute::new("MaterialWeights", 988540917, VertexFormat::Float32x4);
+/// Material blend weights are stored in vertex color (RGBA = 4 layer weights).
+/// This uses Bevy's standard ATTRIBUTE_COLOR for compatibility with
+/// ExtendedMaterial and GPU batching.
 
 /// Spawn a mesh entity for an octree node.
 ///
@@ -149,10 +147,8 @@ pub fn mesh_output_to_bevy(output: &MeshOutput) -> Mesh {
 
   mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
   mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-  mesh.insert_attribute(
-    ATTRIBUTE_MATERIAL_WEIGHTS,
-    VertexAttributeValues::Float32x4(material_weights),
-  );
+  // Material blend weights stored as vertex color (RGBA = 4 layer weights)
+  mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, material_weights);
   mesh.insert_indices(Indices::U32(output.indices.clone()));
 
   mesh

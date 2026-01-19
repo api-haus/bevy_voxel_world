@@ -1,316 +1,413 @@
 //! Triplanar PBR material for voxel terrain.
 //!
-//! Supports 4 texture layers with per-vertex blend weights and
-//! triplanar projection to avoid UV seams on steep surfaces.
+//! Manual AsBindGroup implementation to bypass Bevy's bindless mode.
+//! Uses triplanar texture sampling with 4-layer blending.
+//! Material blend weights are passed via vertex color (RGBA = 4 layer weights).
+//!
+//! Channel packing:
+//! - Diffuse array (4 layers): RGB=Diffuse, A=Height
+//! - Normal array (4 layers): RGB=Normal, A=unused
+//! - Mask array (4 layers): R=Roughness, G=Metallic, B=AO
 
-use bevy::asset::{Asset, RenderAssetUsages};
-use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::asset::RenderAssetUsages;
+use bevy::ecs::system::{lifetimeless::SRes, SystemParamItem};
+use bevy::pbr::{Material, MaterialPlugin};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, ShaderType};
+use bevy::render::render_asset::RenderAssets;
+use bevy::render::render_resource::{
+    binding_types::{sampler, texture_2d_array, uniform_buffer},
+    AsBindGroupError, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, BindGroupLayoutEntries,
+    BindingResources, BindingResource, PipelineCache, PreparedBindGroup, SamplerBindingType,
+    ShaderStages, ShaderType, TextureSampleType, UnpreparedBindGroup,
+    encase::StorageBuffer, BufferInitDescriptor, BufferUsages,
+};
+use bevy::render::render_resource::BindGroupLayoutDescriptor;
+use bevy::render::renderer::RenderDevice;
+use bevy::render::texture::{FallbackImage, GpuImage};
 use bevy::shader::ShaderRef;
 
-use crate::systems::entities::ATTRIBUTE_MATERIAL_WEIGHTS;
+/// Number of texture layers in each array.
+pub const NUM_LAYERS: u32 = 4;
 
-/// Triplanar PBR material with 4 texture layers.
+/// Triplanar material for voxel terrain.
 ///
-/// Each layer has albedo, normal, and ARM (Ambient occlusion, Roughness, Metallic) textures.
-/// Blending between layers is controlled by per-vertex material weights.
-#[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
-#[bind_group_data(TriplanarMaterialKey)]
+/// Provides texture arrays and triplanar sampling parameters with custom PBR lighting.
+/// Material blend weights are read from vertex colors (RGBA = 4 layer weights).
+#[derive(Asset, TypePath, Debug, Clone)]
 pub struct TriplanarMaterial {
-  // Layer 0
-  #[texture(0, dimension = "2d")]
-  #[sampler(1)]
-  pub albedo_0: Handle<Image>,
-  #[texture(2, dimension = "2d")]
-  #[sampler(3)]
-  pub normal_0: Handle<Image>,
-  #[texture(4, dimension = "2d")]
-  #[sampler(5)]
-  pub arm_0: Handle<Image>,
+    /// Diffuse/albedo texture array (4 layers): RGB=Diffuse, A=Height.
+    pub diffuse_array: Handle<Image>,
 
-  // Layer 1
-  #[texture(6, dimension = "2d")]
-  #[sampler(7)]
-  pub albedo_1: Handle<Image>,
-  #[texture(8, dimension = "2d")]
-  #[sampler(9)]
-  pub normal_1: Handle<Image>,
-  #[texture(10, dimension = "2d")]
-  #[sampler(11)]
-  pub arm_1: Handle<Image>,
+    /// Normal map texture array (4 layers): RGB=Normal.
+    pub normal_array: Handle<Image>,
 
-  // Layer 2
-  #[texture(12, dimension = "2d")]
-  #[sampler(13)]
-  pub albedo_2: Handle<Image>,
-  #[texture(14, dimension = "2d")]
-  #[sampler(15)]
-  pub normal_2: Handle<Image>,
-  #[texture(16, dimension = "2d")]
-  #[sampler(17)]
-  pub arm_2: Handle<Image>,
+    /// Material mask texture array (4 layers): R=Roughness, G=Metallic, B=AO.
+    pub mask_array: Handle<Image>,
 
-  // Layer 3
-  #[texture(18, dimension = "2d")]
-  #[sampler(19)]
-  pub albedo_3: Handle<Image>,
-  #[texture(20, dimension = "2d")]
-  #[sampler(21)]
-  pub normal_3: Handle<Image>,
-  #[texture(22, dimension = "2d")]
-  #[sampler(23)]
-  pub arm_3: Handle<Image>,
+    /// Triplanar mapping parameters.
+    pub params: TriplanarParams,
+}
 
-  /// Uniform parameters
-  #[uniform(24)]
-  pub params: TriplanarParams,
+/// Key for material pipeline specialization.
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
+pub struct TriplanarMaterialKey {}
+
+impl From<&TriplanarMaterial> for TriplanarMaterialKey {
+    fn from(_material: &TriplanarMaterial) -> Self {
+        Self {}
+    }
 }
 
 /// Shader parameters for triplanar mapping.
 #[derive(ShaderType, Debug, Clone, Copy)]
 pub struct TriplanarParams {
-  /// Texture scale for each layer (world units per texture repeat).
-  pub texture_scales: [f32; 4],
-  /// Blend sharpness for triplanar projection (higher = sharper transitions).
-  pub blend_sharpness: f32,
-  /// Normal map strength multiplier.
-  pub normal_strength: f32,
-  /// Padding for alignment
-  pub _padding: [f32; 2],
+    /// Texture scale (world units per texture repeat).
+    pub texture_scale: f32,
+    /// Blend sharpness for triplanar projection (higher = sharper transitions).
+    pub blend_sharpness: f32,
+    /// Normal map strength multiplier.
+    pub normal_strength: f32,
+    /// Padding for 16-byte alignment.
+    pub _padding: f32,
 }
 
 impl Default for TriplanarParams {
-  fn default() -> Self {
-    Self {
-      texture_scales: [1.0, 1.0, 1.0, 1.0],
-      blend_sharpness: 4.0,
-      normal_strength: 1.0,
-      _padding: [0.0; 2],
+    fn default() -> Self {
+        Self {
+            texture_scale: 0.1,
+            blend_sharpness: 4.0,
+            normal_strength: 1.0,
+            _padding: 0.0,
+        }
     }
-  }
 }
 
-/// Key for material pipeline specialization.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct TriplanarMaterialKey {
-  pub cull_mode: bool,
-}
+/// Manual AsBindGroup implementation to bypass bindless mode.
+/// texture_2d_array is not compatible with Bevy's bindless system.
+impl bevy::render::render_resource::AsBindGroup for TriplanarMaterial {
+    type Data = TriplanarMaterialKey;
+    type Param = (SRes<RenderAssets<GpuImage>>, SRes<FallbackImage>);
 
-impl From<&TriplanarMaterial> for TriplanarMaterialKey {
-  fn from(_material: &TriplanarMaterial) -> Self {
-    Self { cull_mode: false }
-  }
+    fn label() -> &'static str {
+        "triplanar_material_bind_group"
+    }
+
+    fn as_bind_group(
+        &self,
+        layout_descriptor: &BindGroupLayoutDescriptor,
+        render_device: &RenderDevice,
+        pipeline_cache: &PipelineCache,
+        (image_assets, _fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
+    ) -> Result<PreparedBindGroup, AsBindGroupError> {
+        // Get GPU images or return retry
+        let diffuse_gpu = image_assets
+            .get(&self.diffuse_array)
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+        let normal_gpu = image_assets
+            .get(&self.normal_array)
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+        let mask_gpu = image_assets
+            .get(&self.mask_array)
+            .ok_or(AsBindGroupError::RetryNextUpdate)?;
+
+        // Create uniform buffer for params
+        let mut buffer = StorageBuffer::new(Vec::new());
+        buffer.write(&self.params).unwrap();
+        let params_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("triplanar_params_buffer"),
+            contents: buffer.as_ref(),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+
+        let layout = &pipeline_cache.get_bind_group_layout(layout_descriptor);
+
+        // Create bind group with all resources
+        let bind_group = render_device.create_bind_group(
+            Self::label(),
+            layout,
+            &[
+                // Binding 0: diffuse texture array
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&diffuse_gpu.texture_view),
+                },
+                // Binding 1: diffuse sampler
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&diffuse_gpu.sampler),
+                },
+                // Binding 2: normal texture array
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&normal_gpu.texture_view),
+                },
+                // Binding 3: normal sampler
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&normal_gpu.sampler),
+                },
+                // Binding 4: mask texture array
+                BindGroupEntry {
+                    binding: 4,
+                    resource: BindingResource::TextureView(&mask_gpu.texture_view),
+                },
+                // Binding 5: mask sampler
+                BindGroupEntry {
+                    binding: 5,
+                    resource: BindingResource::Sampler(&mask_gpu.sampler),
+                },
+                // Binding 6: params uniform
+                BindGroupEntry {
+                    binding: 6,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        );
+
+        Ok(PreparedBindGroup {
+            bindings: BindingResources(vec![]),
+            bind_group,
+        })
+    }
+
+    fn bind_group_data(&self) -> Self::Data {
+        TriplanarMaterialKey::from(self)
+    }
+
+    fn unprepared_bind_group(
+        &self,
+        _layout: &BindGroupLayout,
+        _render_device: &RenderDevice,
+        _param: &mut SystemParamItem<'_, '_, Self::Param>,
+        _force_no_bindless: bool,
+    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
+        // Signal that we create the bind group directly via as_bind_group()
+        // This bypasses bindless mode which doesn't support texture_2d_array
+        Err(AsBindGroupError::CreateBindGroupDirectly)
+    }
+
+    fn bind_group_layout_entries(
+        _render_device: &RenderDevice,
+        _force_no_bindless: bool,
+    ) -> Vec<BindGroupLayoutEntry>
+    where
+        Self: Sized,
+    {
+        BindGroupLayoutEntries::with_indices(
+            ShaderStages::VERTEX_FRAGMENT,
+            (
+                // Binding 0: diffuse texture array
+                (0, texture_2d_array(TextureSampleType::Float { filterable: true })),
+                // Binding 1: diffuse sampler
+                (1, sampler(SamplerBindingType::Filtering)),
+                // Binding 2: normal texture array
+                (2, texture_2d_array(TextureSampleType::Float { filterable: true })),
+                // Binding 3: normal sampler
+                (3, sampler(SamplerBindingType::Filtering)),
+                // Binding 4: mask texture array
+                (4, texture_2d_array(TextureSampleType::Float { filterable: true })),
+                // Binding 5: mask sampler
+                (5, sampler(SamplerBindingType::Filtering)),
+                // Binding 6: params uniform
+                (6, uniform_buffer::<TriplanarParams>(false)),
+            ),
+        )
+        .to_vec()
+    }
 }
 
 impl Material for TriplanarMaterial {
-  fn vertex_shader() -> ShaderRef {
-    "shaders/triplanar.wgsl".into()
-  }
+    fn fragment_shader() -> ShaderRef {
+        "shaders/triplanar.wgsl".into()
+    }
 
-  fn fragment_shader() -> ShaderRef {
-    "shaders/triplanar.wgsl".into()
-  }
-
-  fn specialize(
-    _pipeline: &bevy::pbr::MaterialPipeline,
-    descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
-    layout: &MeshVertexBufferLayoutRef,
-    _key: bevy::pbr::MaterialPipelineKey<Self>,
-  ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
-    // Add material weights vertex attribute
-    let vertex_layout = layout.0.get_layout(&[
-      Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-      Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-      ATTRIBUTE_MATERIAL_WEIGHTS.at_shader_location(2),
-    ])?;
-    descriptor.vertex.buffers = vec![vertex_layout];
-
-    // Double-sided rendering (no backface culling)
-    descriptor.primitive.cull_mode = None;
-
-    Ok(())
-  }
+    fn vertex_shader() -> ShaderRef {
+        "shaders/triplanar.wgsl".into()
+    }
 }
 
 /// Plugin to register the triplanar material.
 pub struct TriplanarMaterialPlugin;
 
 impl Plugin for TriplanarMaterialPlugin {
-  fn build(&self, app: &mut App) {
-    app.add_plugins(MaterialPlugin::<TriplanarMaterial>::default());
-  }
+    fn build(&self, app: &mut App) {
+        app.add_plugins(MaterialPlugin::<TriplanarMaterial>::default());
+    }
 }
 
-/// Create a solid color 4x4 image for placeholder textures.
-fn create_solid_image(color: [u8; 4]) -> Image {
-  use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-
-  let size = 4;
-  let data: Vec<u8> = (0..size * size).flat_map(|_| color).collect();
-
-  Image::new(
-    Extent3d {
-      width: size,
-      height: size,
-      depth_or_array_layers: 1,
-    },
-    TextureDimension::D2,
-    data,
-    TextureFormat::Rgba8UnormSrgb,
-    RenderAssetUsages::RENDER_WORLD,
-  )
-}
-
-/// Create a neutral normal map (pointing up).
-fn create_neutral_normal() -> Image {
-  // Normal map neutral = (0.5, 0.5, 1.0) in RGB = (128, 128, 255)
-  create_solid_image([128, 128, 255, 255])
-}
-
-/// Create a default ARM texture (no AO, medium roughness, no metallic).
-fn create_default_arm() -> Image {
-  // R=AO (1.0=white), G=Roughness (0.7), B=Metallic (0.0)
-  create_solid_image([255, 178, 0, 255])
-}
-
-/// Layer colors for placeholder textures.
+/// Layer colors for placeholder diffuse textures.
 pub const LAYER_COLORS: [[u8; 4]; 4] = [
-  [120, 100, 80, 255],  // Layer 0: Brown (dirt)
-  [100, 140, 80, 255],  // Layer 1: Green (grass)
-  [140, 140, 140, 255], // Layer 2: Gray (stone)
-  [200, 200, 210, 255], // Layer 3: Light gray (snow/sand)
+    [120, 100, 80, 255],  // Layer 0: Brown (dirt)
+    [100, 140, 80, 255],  // Layer 1: Green (grass)
+    [140, 140, 140, 255], // Layer 2: Gray (stone)
+    [200, 200, 210, 255], // Layer 3: Light gray (snow/sand)
 ];
 
-/// Create a triplanar material with placeholder textures.
+/// Create a 2D array texture with 4 layers.
 ///
-/// This creates simple solid-color textures for testing.
-/// Replace with actual texture assets for production.
+/// Each layer has a checkerboard pattern with the specified tint color.
+fn create_texture_array(
+    size: u32,
+    layers: &[[u8; 4]; 4],
+    format: bevy::render::render_resource::TextureFormat,
+) -> Image {
+    use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureViewDescriptor, TextureViewDimension};
+
+    let mut data = Vec::with_capacity((size * size * 4) as usize * NUM_LAYERS as usize);
+
+    let checker_size = size / 4;
+
+    for layer_color in layers {
+        for y in 0..size {
+            for x in 0..size {
+                let checker_x = (x / checker_size.max(1)) % 2;
+                let checker_y = (y / checker_size.max(1)) % 2;
+                let is_light = (checker_x + checker_y) % 2 == 0;
+
+                if is_light {
+                    data.push(layer_color[0].saturating_add(40));
+                    data.push(layer_color[1].saturating_add(40));
+                    data.push(layer_color[2].saturating_add(40));
+                    data.push(layer_color[3]);
+                } else {
+                    data.push(layer_color[0].saturating_sub(40));
+                    data.push(layer_color[1].saturating_sub(40));
+                    data.push(layer_color[2].saturating_sub(40));
+                    data.push(layer_color[3]);
+                }
+            }
+        }
+    }
+
+    let mut image = Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: NUM_LAYERS,
+        },
+        TextureDimension::D2,
+        data,
+        format,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..Default::default()
+    });
+
+    image
+}
+
+/// Create a neutral normal map array (all layers pointing up).
+fn create_neutral_normal_array(size: u32) -> Image {
+    use bevy::render::render_resource::TextureFormat;
+    let neutral_normal = [128u8, 128, 255, 255];
+    let layers = [neutral_normal, neutral_normal, neutral_normal, neutral_normal];
+    create_texture_array(size, &layers, TextureFormat::Rgba8Unorm)
+}
+
+/// Create a default mask array (medium roughness, no metallic, full AO).
+fn create_default_mask_array(size: u32) -> Image {
+    use bevy::render::render_resource::TextureFormat;
+    let default_mask = [178u8, 0, 255, 255]; // R=roughness, G=metallic, B=AO
+    let layers = [default_mask, default_mask, default_mask, default_mask];
+    create_texture_array(size, &layers, TextureFormat::Rgba8Unorm)
+}
+
+/// Create a triplanar material with placeholder texture arrays.
 pub fn create_placeholder_material(images: &mut Assets<Image>) -> TriplanarMaterial {
-  // Create placeholder textures for all 4 layers
-  let albedo_0 = images.add(create_solid_image(LAYER_COLORS[0]));
-  let albedo_1 = images.add(create_solid_image(LAYER_COLORS[1]));
-  let albedo_2 = images.add(create_solid_image(LAYER_COLORS[2]));
-  let albedo_3 = images.add(create_solid_image(LAYER_COLORS[3]));
+    let texture_size = 64;
 
-  let normal_0 = images.add(create_neutral_normal());
-  let normal_1 = images.add(create_neutral_normal());
-  let normal_2 = images.add(create_neutral_normal());
-  let normal_3 = images.add(create_neutral_normal());
+    use bevy::render::render_resource::TextureFormat;
+    let diffuse_array = images.add(create_texture_array(texture_size, &LAYER_COLORS, TextureFormat::Rgba8UnormSrgb));
+    let normal_array = images.add(create_neutral_normal_array(texture_size));
+    let mask_array = images.add(create_default_mask_array(texture_size));
 
-  let arm_0 = images.add(create_default_arm());
-  let arm_1 = images.add(create_default_arm());
-  let arm_2 = images.add(create_default_arm());
-  let arm_3 = images.add(create_default_arm());
+    TriplanarMaterial {
+        diffuse_array,
+        normal_array,
+        mask_array,
+        params: TriplanarParams::default(),
+    }
+}
 
-  TriplanarMaterial {
-    albedo_0,
-    normal_0,
-    arm_0,
-    albedo_1,
-    normal_1,
-    arm_1,
-    albedo_2,
-    normal_2,
-    arm_2,
-    albedo_3,
-    normal_3,
-    arm_3,
-    params: TriplanarParams {
-      texture_scales: [0.1, 0.1, 0.1, 0.1], // 10 world units per texture repeat
-      blend_sharpness: 4.0,
-      normal_strength: 1.0,
-      _padding: [0.0; 2],
-    },
-  }
+/// Load baked terrain texture arrays from KTX2 files.
+pub fn load_baked_terrain_material(
+    asset_server: &AssetServer,
+    materials: &mut Assets<TriplanarMaterial>,
+) -> Handle<TriplanarMaterial> {
+    use bevy::image::{ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
+
+    let sampler = ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..Default::default()
+    };
+
+    let settings = move |s: &mut ImageLoaderSettings| {
+        s.sampler = ImageSampler::Descriptor(sampler.clone());
+    };
+
+    let diffuse_array = asset_server.load_with_settings("textures/terrain/diffuse_height.ktx2", settings.clone());
+    let normal_array = asset_server.load_with_settings("textures/terrain/normal.ktx2", settings.clone());
+    let mask_array = asset_server.load_with_settings("textures/terrain/material.ktx2", settings);
+
+    materials.add(TriplanarMaterial {
+        diffuse_array,
+        normal_array,
+        mask_array,
+        params: TriplanarParams::default(),
+    })
 }
 
 /// Configuration for loading terrain textures from files.
 pub struct TerrainTextureConfig {
-  /// Base path for texture files (e.g., "textures/terrain/").
-  pub base_path: String,
-  /// Texture file names for each layer [albedo, normal, arm].
-  pub layers: [LayerTextures; 4],
-  /// Texture scale for each layer.
-  pub scales: [f32; 4],
-}
-
-/// Texture file names for a single layer.
-pub struct LayerTextures {
-  pub albedo: String,
-  pub normal: String,
-  pub arm: String,
+    pub base_path: String,
+    pub diffuse_files: [String; 4],
+    pub normal_files: [String; 4],
+    pub mask_files: [String; 4],
+    pub texture_scale: f32,
 }
 
 impl Default for TerrainTextureConfig {
-  fn default() -> Self {
-    Self {
-      base_path: "textures/terrain/".to_string(),
-      layers: [
-        LayerTextures {
-          albedo: "dirt_albedo.png".to_string(),
-          normal: "dirt_normal.png".to_string(),
-          arm: "dirt_arm.png".to_string(),
-        },
-        LayerTextures {
-          albedo: "grass_albedo.png".to_string(),
-          normal: "grass_normal.png".to_string(),
-          arm: "grass_arm.png".to_string(),
-        },
-        LayerTextures {
-          albedo: "stone_albedo.png".to_string(),
-          normal: "stone_normal.png".to_string(),
-          arm: "stone_arm.png".to_string(),
-        },
-        LayerTextures {
-          albedo: "snow_albedo.png".to_string(),
-          normal: "snow_normal.png".to_string(),
-          arm: "snow_arm.png".to_string(),
-        },
-      ],
-      scales: [0.1, 0.1, 0.05, 0.1],
+    fn default() -> Self {
+        Self {
+            base_path: "textures/terrain/".to_string(),
+            diffuse_files: [
+                "diffuse_height_0.png".to_string(),
+                "diffuse_height_1.png".to_string(),
+                "diffuse_height_2.png".to_string(),
+                "diffuse_height_3.png".to_string(),
+            ],
+            normal_files: [
+                "normal_0.png".to_string(),
+                "normal_1.png".to_string(),
+                "normal_2.png".to_string(),
+                "normal_3.png".to_string(),
+            ],
+            mask_files: [
+                "material_0.png".to_string(),
+                "material_1.png".to_string(),
+                "material_2.png".to_string(),
+                "material_3.png".to_string(),
+            ],
+            texture_scale: 0.1,
+        }
     }
-  }
-}
-
-/// Create a triplanar material by loading textures from files.
-///
-/// Falls back to placeholder textures if files don't exist.
-pub fn create_material_from_config(
-  asset_server: &AssetServer,
-  images: &mut Assets<Image>,
-  config: &TerrainTextureConfig,
-) -> TriplanarMaterial {
-  // Helper to load texture from assets
-  let load_texture = |path: &str| -> Handle<Image> {
-    let full_path = format!("{}{}", config.base_path, path);
-    asset_server.load(full_path)
-  };
-
-  let _ = images; // Unused when loading from files
-
-  TriplanarMaterial {
-    albedo_0: load_texture(&config.layers[0].albedo),
-    normal_0: load_texture(&config.layers[0].normal),
-    arm_0: load_texture(&config.layers[0].arm),
-
-    albedo_1: load_texture(&config.layers[1].albedo),
-    normal_1: load_texture(&config.layers[1].normal),
-    arm_1: load_texture(&config.layers[1].arm),
-
-    albedo_2: load_texture(&config.layers[2].albedo),
-    normal_2: load_texture(&config.layers[2].normal),
-    arm_2: load_texture(&config.layers[2].arm),
-
-    albedo_3: load_texture(&config.layers[3].albedo),
-    normal_3: load_texture(&config.layers[3].normal),
-    arm_3: load_texture(&config.layers[3].arm),
-
-    params: TriplanarParams {
-      texture_scales: config.scales,
-      blend_sharpness: 4.0,
-      normal_strength: 1.0,
-      _padding: [0.0; 2],
-    },
-  }
 }

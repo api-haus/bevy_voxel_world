@@ -14,6 +14,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bevy::prelude::*;
+use bevy::camera::Exposure;
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::{light_consts::lux, CascadeShadowConfigBuilder};
+use bevy::pbr::{Atmosphere, AtmosphereSettings, ScatteringMedium};
+use bevy::post_process::bloom::Bloom;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -22,10 +27,11 @@ use voxel_bevy::components::{VoxelChunk, VoxelViewer};
 use voxel_bevy::entity_queue::{EntityQueue, EntityQueueConfig};
 use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
 use voxel_bevy::input::{fly_camera_input_bundle, CameraInputContext};
-use voxel_bevy::resources::{ChunkEntityMap, LodMaterials, VoxelMetricsResource};
-use voxel_bevy::systems::entities::spawn_chunk_entity;
+use voxel_bevy::resources::{ChunkEntityMap, LodMaterials, TerrainMaterial, VoxelMetricsResource};
+use voxel_bevy::systems::entities::{spawn_chunk_entity, spawn_triplanar_chunk_entity};
 use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
+use voxel_bevy::{load_baked_terrain_material, TriplanarMaterial};
 #[cfg(feature = "metrics")]
 use voxel_bevy::debug_ui::voxel_metrics_ui;
 use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
@@ -51,6 +57,7 @@ pub struct NoiseLodPlugin;
 impl Plugin for NoiseLodPlugin {
   fn build(&self, app: &mut App) {
     app
+      .add_plugins(voxel_bevy::TriplanarMaterialPlugin)
       .init_resource::<UiSettings>()
       .init_resource::<WorldChunkMap>()
       .init_resource::<AsyncRefinementState>()
@@ -118,52 +125,67 @@ impl SamplerSource {
 /// Default world half-extent (50k units = 100k x 100k x 100k world).
 const DEFAULT_WORLD_HALF_EXTENT: f64 = 50000.0;
 
-/// UI settings resource for demo controls.
-#[derive(Resource)]
-struct UiSettings {
+/// All UI settings state (comparable for change detection).
+#[derive(Clone, PartialEq)]
+struct SettingsState {
 	lod_colors_enabled: bool,
 	current_seed: i32,
-	prev_lod_colors_enabled: bool,
-	sampler_source: SamplerSource,
-	prev_sampler_source: SamplerSource,
-
-	// World config parameters
 	voxel_size: f64,
 	world_half_extent: f64,
 	min_lod: i32,
 	max_lod: i32,
 	lod_exponent: f64,
-
-	// Previous values for change detection
-	prev_voxel_size: f64,
-	prev_world_half_extent: f64,
-	prev_min_lod: i32,
-	prev_max_lod: i32,
-	prev_lod_exponent: f64,
+	sampler_source: SamplerSource,
+	use_triplanar: bool,
 }
 
-impl Default for UiSettings {
+impl Default for SettingsState {
 	fn default() -> Self {
 		Self {
-			lod_colors_enabled: true,
+			lod_colors_enabled: false,
 			current_seed: 1337,
-			prev_lod_colors_enabled: true,
-			sampler_source: SamplerSource::default(),
-			prev_sampler_source: SamplerSource::default(),
-
-			// World config defaults
 			voxel_size: 0.25,
 			world_half_extent: DEFAULT_WORLD_HALF_EXTENT,
 			min_lod: 0,
 			max_lod: 31,
 			lod_exponent: 1.0,
+			sampler_source: SamplerSource::default(),
+			use_triplanar: true,
+		}
+	}
+}
 
-			// Previous values (same as current initially)
-			prev_voxel_size: 0.25,
-			prev_world_half_extent: DEFAULT_WORLD_HALF_EXTENT,
-			prev_min_lod: 0,
-			prev_max_lod: 31,
-			prev_lod_exponent: 1.0,
+impl SettingsState {
+	/// Check if world needs rebuild (ignores lod_colors_enabled which only recolors).
+	fn needs_rebuild(&self, other: &Self) -> bool {
+		self.current_seed != other.current_seed
+			|| self.voxel_size != other.voxel_size
+			|| self.world_half_extent != other.world_half_extent
+			|| self.min_lod != other.min_lod
+			|| self.max_lod != other.max_lod
+			|| self.lod_exponent != other.lod_exponent
+			|| self.sampler_source != other.sampler_source
+			|| self.use_triplanar != other.use_triplanar
+	}
+
+	/// Check if just LOD colors changed (can recolor without rebuild).
+	fn lod_colors_changed(&self, other: &Self) -> bool {
+		self.lod_colors_enabled != other.lod_colors_enabled
+	}
+}
+
+/// UI settings resource for demo controls.
+#[derive(Resource)]
+struct UiSettings {
+	current: SettingsState,
+	prev: SettingsState,
+}
+
+impl Default for UiSettings {
+	fn default() -> Self {
+		Self {
+			current: SettingsState::default(),
+			prev: SettingsState::default(),
 		}
 	}
 }
@@ -232,6 +254,9 @@ fn setup(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
 	mut materials: ResMut<Assets<StandardMaterial>>,
+	mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
+	mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
+	asset_server: Res<AssetServer>,
 	mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
 	camera_query: Query<Entity, With<crate::MainCamera>>,
 	settings: Res<UiSettings>,
@@ -239,10 +264,10 @@ fn setup(
 	info!("[NoiseLod] Setting up octree scene (async)...");
 
 	// 1. Create terrain sampler (using default settings)
-	let sampler = create_sampler(settings.sampler_source, settings.current_seed);
+	let sampler = create_sampler(settings.current.sampler_source, settings.current.current_seed);
 
 	// 2. Create world bounds from settings
-	let world_half_extent = settings.world_half_extent;
+	let world_half_extent = settings.current.world_half_extent;
 	let world_bounds = DAabb3::from_center_half_extents(
 		DVec3::ZERO,
 		DVec3::new(world_half_extent, world_half_extent, world_half_extent),
@@ -250,11 +275,11 @@ fn setup(
 
 	// 3. Create octree configuration with world bounds from settings
 	let config = OctreeConfig {
-		voxel_size: settings.voxel_size,
+		voxel_size: settings.current.voxel_size,
 		world_origin: DVec3::new(-world_half_extent, -world_half_extent, -world_half_extent),
-		min_lod: settings.min_lod,
-		max_lod: settings.max_lod,
-		lod_exponent: settings.lod_exponent,
+		min_lod: settings.current.min_lod,
+		max_lod: settings.current.max_lod,
+		lod_exponent: settings.current.lod_exponent,
 		world_bounds: Some(world_bounds),
 	};
 
@@ -275,15 +300,22 @@ fn setup(
   // 4. Create per-LOD materials
   let lod_materials = create_lod_materials(&mut materials);
 
+  // 4b. Load baked triplanar terrain material
+  let terrain_material = {
+    let handle = load_baked_terrain_material(&asset_server, &mut triplanar_materials);
+    TerrainMaterial { handle }
+  };
+
   // 5. Spawn VoxelWorldRoot entity (no meshes yet - async will generate them)
   commands.spawn((world_root, Transform::default(), SceneEntity));
 
   // 6. Insert resources
   commands.insert_resource(ChunkEntityMap::default());
   commands.insert_resource(lod_materials);
+  commands.insert_resource(terrain_material);
 
 	// 7. Setup camera and lights immediately
-	setup_camera_and_lights(&mut commands, &camera_query);
+	setup_camera_and_lights(&mut commands, &mut scattering_mediums, &camera_query);
 
 	// 8. Spawn scale reference poles
 	spawn_scale_reference_poles(&mut commands, &mut meshes, &mut materials);
@@ -337,9 +369,9 @@ fn initial_mesh_gen(
 	);
 
 	// Create sampler and start async processing (uses old pipeline for initial gen)
-	let started = match settings.sampler_source {
+	let started = match settings.current.sampler_source {
 		SamplerSource::FastNoise2 => {
-			let sampler = FastNoise2Terrain::new(settings.current_seed);
+			let sampler = FastNoise2Terrain::new(settings.current.current_seed);
 			async_state
 				.initial_pipeline
 				.start(world_id, vec![transition], sampler, leaves, config)
@@ -362,6 +394,7 @@ fn poll_initial_mesh_gen(
 	world_roots: Query<&VoxelWorldRoot>,
 	settings: Res<UiSettings>,
 	lod_materials: Option<Res<LodMaterials>>,
+	terrain_material: Option<Res<TerrainMaterial>>,
 	mut chunk_map: Option<ResMut<ChunkEntityMap>>,
 	mut world_chunk_map: ResMut<WorldChunkMap>,
 ) {
@@ -381,7 +414,8 @@ fn poll_initial_mesh_gen(
 	};
 
 	let config = world_root.config().clone();
-	let use_lod_colors = settings.lod_colors_enabled;
+	let use_lod_colors = settings.current.lod_colors_enabled;
+	let use_triplanar = settings.current.use_triplanar && terrain_material.is_some();
 
 	// Process events - for initial gen, spawn immediately (no queue)
 	for event in events {
@@ -394,9 +428,10 @@ fn poll_initial_mesh_gen(
 				chunks: ready_chunks,
 			} => {
 				info!(
-					"[InitialGen] ChunksReady: {} chunks for world {:?}",
+					"[InitialGen] ChunksReady: {} chunks for world {:?} (triplanar: {})",
 					ready_chunks.len(),
-					world_id
+					world_id,
+					use_triplanar
 				);
 
 				let mut local_chunk_map = ChunkEntityMap::default();
@@ -411,17 +446,31 @@ fn poll_initial_mesh_gen(
 						continue;
 					}
 
-					spawn_chunk_entity_with_marker(
-						&mut commands,
-						&mut meshes,
-						lod_materials.get(ready.node.lod, use_lod_colors),
-						chunk_map_ref,
-						&mut world_chunk_map,
-						world_id,
-						ready.node,
-						&ready.output,
-						&config,
-					);
+					if use_triplanar {
+						spawn_triplanar_chunk_entity_with_marker(
+							&mut commands,
+							&mut meshes,
+							terrain_material.as_ref().unwrap().handle.clone(),
+							chunk_map_ref,
+							&mut world_chunk_map,
+							world_id,
+							ready.node,
+							&ready.output,
+							&config,
+						);
+					} else {
+						spawn_chunk_entity_with_marker(
+							&mut commands,
+							&mut meshes,
+							lod_materials.get(ready.node.lod, use_lod_colors),
+							chunk_map_ref,
+							&mut world_chunk_map,
+							world_id,
+							ready.node,
+							&ready.output,
+							&config,
+						);
+					}
 				}
 			}
 		}
@@ -460,7 +509,7 @@ fn create_lod_materials(materials: &mut Assets<StandardMaterial>) -> LodMaterial
   }
 }
 
-/// Spawn a chunk entity with SceneEntity marker
+/// Spawn a chunk entity with SceneEntity marker (StandardMaterial)
 fn spawn_chunk_entity_with_marker(
   commands: &mut Commands,
   meshes: &mut Assets<Mesh>,
@@ -491,15 +540,57 @@ fn spawn_chunk_entity_with_marker(
   }
 }
 
-/// Setup camera and lighting
+/// Spawn a chunk entity with SceneEntity marker (TriplanarMaterial)
+fn spawn_triplanar_chunk_entity_with_marker(
+  commands: &mut Commands,
+  meshes: &mut Assets<Mesh>,
+  material: Handle<TriplanarMaterial>,
+  chunk_map: &mut ChunkEntityMap,
+  world_chunk_map: &mut WorldChunkMap,
+  world_id: voxel_plugin::world::WorldId,
+  node: OctreeNode,
+  output: &voxel_plugin::MeshOutput,
+  config: &OctreeConfig,
+) {
+  // Use the triplanar spawn function but add SceneEntity
+  spawn_triplanar_chunk_entity(
+    commands,
+    meshes,
+    material,
+    chunk_map,
+    Some(world_chunk_map),
+    world_id,
+    node,
+    output,
+    config,
+  );
+
+  // Get the entity that was just spawned (last one in chunk_map)
+  if let Some(&entity) = chunk_map.map.get(&node) {
+    commands.entity(entity).insert(SceneEntity);
+  }
+}
+
+/// Setup camera and lighting with atmospheric scattering
 fn setup_camera_and_lights(
   commands: &mut Commands,
+  scattering_mediums: &mut Assets<ScatteringMedium>,
   camera_query: &Query<Entity, With<crate::MainCamera>>,
 ) {
-  // Configure existing main camera with FlyCamera and VoxelViewer
+  // Configure existing main camera with FlyCamera, VoxelViewer, and Atmosphere
   // Position camera above terrain (world is centered at origin, spans -50k to +50k)
-  if let Ok(camera_entity) = camera_query.single() {
-    // Position camera above terrain center, looking down at slight angle
+
+  // Get or spawn camera entity
+  // Note: MainCamera might not exist yet due to Bevy's schedule order (OnEnter can run before Startup)
+  let camera_entity = if let Ok(entity) = camera_query.single() {
+    info!("[NoiseLod] Found existing MainCamera entity {:?}", entity);
+    entity
+  } else {
+    info!("[NoiseLod] MainCamera not found, spawning new camera");
+    commands.spawn((Camera3d::default(), crate::MainCamera)).id()
+  };
+
+  // Position camera above terrain center, looking down at slight angle
     // World extends ~100k units from origin; start near center
     let camera_pos = Vec3::new(0.0, 2000.0, 5000.0);
     let look_target = Vec3::new(0.0, 0.0, 0.0);
@@ -520,26 +611,43 @@ fn setup_camera_and_lights(
         pitch,
       }),
       VoxelViewer,
+      // Earthlike atmosphere - physically-based atmospheric scattering
+      Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
+      // Atmosphere rendering settings (defaults work well)
+      AtmosphereSettings::default(),
+      // Higher exposure to compensate for bright raw sunlight illuminance
+      Exposure { ev100: 13.0 },
+      // Natural-looking tonemapping
+      Tonemapping::AcesFitted,
+      // Bloom for natural sun glow
+      Bloom::NATURAL,
     ));
-  }
 
-  // Directional light (sun)
+  // Configure cascade shadow map scaled for large terrain (units in meters/kilometers)
+  let cascade_shadow_config = CascadeShadowConfigBuilder {
+    first_cascade_far_bound: 500.0, // First cascade 500 units
+    maximum_distance: 50000.0,      // Cover terrain up to 50km
+    ..default()
+  }
+  .build();
+
+  // Directional light (sun) with RAW_SUNLIGHT for proper atmosphere interaction
   commands.spawn((
     DirectionalLight {
-      illuminance: 10000.0,
+      // RAW_SUNLIGHT is the proper input for atmosphere scattering -
+      // it's the sun's illuminance before being filtered by atmosphere
+      illuminance: lux::RAW_SUNLIGHT,
       shadows_enabled: true,
       ..default()
     },
-    Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, 0.5, 0.0)),
+    // Sun position - slightly above horizon for dramatic lighting
+    Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.5, 0.0)),
+    cascade_shadow_config,
     SceneEntity,
   ));
 
-	// Ambient light
-	commands.insert_resource(GlobalAmbientLight {
-		color: Color::srgb(0.6, 0.7, 0.8),
-		brightness: 200.0,
-		affects_lightmapped_meshes: false,
-	});
+  // Disable ambient light - atmosphere provides ambient via IBL
+  commands.insert_resource(GlobalAmbientLight::NONE);
 }
 
 /// Number of scale reference poles to spawn
@@ -658,7 +766,8 @@ fn ui_controls(
 		.anchor(egui::Align2::RIGHT_TOP, [-10.0, 60.0])
 		.resizable(false)
 		.show(ctx, |ui| {
-			ui.checkbox(&mut settings.lod_colors_enabled, "LOD Colors");
+			ui.checkbox(&mut settings.current.use_triplanar, "Triplanar Shader");
+			ui.add_enabled(!settings.current.use_triplanar, egui::Checkbox::new(&mut settings.current.lod_colors_enabled, "LOD Colors"));
 
 			ui.separator();
 
@@ -695,22 +804,22 @@ fn ui_controls(
 
 			ui.horizontal(|ui| {
 				ui.label("Seed:");
-				ui.add(egui::DragValue::new(&mut settings.current_seed));
+				ui.add(egui::DragValue::new(&mut settings.current.current_seed));
 			});
 
 			if ui.button("Rebuild World").clicked() {
 				rebuild_events.write(RebuildWorldEvent {
-					seed: settings.current_seed,
-					sampler_source: settings.sampler_source,
+					seed: settings.current.current_seed,
+					sampler_source: settings.current.sampler_source,
 				});
 			}
 
 			if ui.button("Random Seed").clicked() {
 				let new_seed = rand::rng().random::<i32>();
-				settings.current_seed = new_seed;
+				settings.current.current_seed = new_seed;
 				rebuild_events.write(RebuildWorldEvent {
 					seed: new_seed,
-					sampler_source: settings.sampler_source,
+					sampler_source: settings.current.sampler_source,
 				});
 			}
 
@@ -720,10 +829,10 @@ fn ui_controls(
 			ui.horizontal(|ui| {
 				ui.label("Noise:");
 				egui::ComboBox::from_id_salt("sampler_source")
-					.selected_text(settings.sampler_source.name())
+					.selected_text(settings.current.sampler_source.name())
 					.show_ui(ui, |ui| {
 						ui.selectable_value(
-							&mut settings.sampler_source,
+							&mut settings.current.sampler_source,
 							SamplerSource::FastNoise2,
 							"FastNoise2",
 						);
@@ -737,7 +846,7 @@ fn ui_controls(
 				ui.horizontal(|ui| {
 					ui.label("Voxel Size:");
 					ui.add(
-						egui::DragValue::new(&mut settings.voxel_size)
+						egui::DragValue::new(&mut settings.current.voxel_size)
 							.speed(0.01)
 							.range(0.01..=10.0)
 							.suffix(" units"),
@@ -747,7 +856,7 @@ fn ui_controls(
 				ui.horizontal(|ui| {
 					ui.label("World Size:");
 					// Display as full extent (diameter), edit as half-extent internally
-					let mut world_size = settings.world_half_extent * 2.0;
+					let mut world_size = settings.current.world_half_extent * 2.0;
 					if ui
 						.add(
 							egui::DragValue::new(&mut world_size)
@@ -757,18 +866,18 @@ fn ui_controls(
 						)
 						.changed()
 					{
-						settings.world_half_extent = world_size / 2.0;
+						settings.current.world_half_extent = world_size / 2.0;
 					}
 				});
 
 				// Read values before mutable borrows for range constraints
-				let max_lod_val = settings.max_lod;
-				let min_lod_val = settings.min_lod;
+				let max_lod_val = settings.current.max_lod;
+				let min_lod_val = settings.current.min_lod;
 
 				ui.horizontal(|ui| {
 					ui.label("Min LOD:");
 					ui.add(
-						egui::DragValue::new(&mut settings.min_lod)
+						egui::DragValue::new(&mut settings.current.min_lod)
 							.speed(1)
 							.range(0..=max_lod_val - 1),
 					);
@@ -777,7 +886,7 @@ fn ui_controls(
 				ui.horizontal(|ui| {
 					ui.label("Max LOD:");
 					ui.add(
-						egui::DragValue::new(&mut settings.max_lod)
+						egui::DragValue::new(&mut settings.current.max_lod)
 							.speed(1)
 							.range(min_lod_val + 1..=31),
 					);
@@ -786,37 +895,23 @@ fn ui_controls(
 				ui.horizontal(|ui| {
 					ui.label("LOD Exponent:");
 					ui.add(
-						egui::DragValue::new(&mut settings.lod_exponent)
+						egui::DragValue::new(&mut settings.current.lod_exponent)
 							.speed(0.1)
 							.range(0.0..=4.0),
 					);
 				});
 
 				// Show computed info
-				let base_cell_size = settings.voxel_size * 28.0; // VOXELS_PER_CELL = 28
+				let base_cell_size = settings.current.voxel_size * 28.0; // VOXELS_PER_CELL = 28
 				ui.label(format!("Cell size (LOD 0): {:.2} units", base_cell_size));
 			});
 
 			// Check for world parameter changes and trigger rebuild
-			let world_params_changed = settings.voxel_size != settings.prev_voxel_size
-				|| settings.world_half_extent != settings.prev_world_half_extent
-				|| settings.min_lod != settings.prev_min_lod
-				|| settings.max_lod != settings.prev_max_lod
-				|| settings.lod_exponent != settings.prev_lod_exponent
-				|| settings.sampler_source != settings.prev_sampler_source;
-
-			if world_params_changed {
-				// Update previous values
-				settings.prev_voxel_size = settings.voxel_size;
-				settings.prev_world_half_extent = settings.world_half_extent;
-				settings.prev_min_lod = settings.min_lod;
-				settings.prev_max_lod = settings.max_lod;
-				settings.prev_lod_exponent = settings.lod_exponent;
-				settings.prev_sampler_source = settings.sampler_source;
-
+			if settings.current.needs_rebuild(&settings.prev) {
+				settings.prev = settings.current.clone();
 				rebuild_events.write(RebuildWorldEvent {
-					seed: settings.current_seed,
-					sampler_source: settings.sampler_source,
+					seed: settings.current.current_seed,
+					sampler_source: settings.current.sampler_source,
 				});
 			}
 		});
@@ -828,17 +923,17 @@ fn toggle_lod_colors(
   lod_materials: Option<Res<LodMaterials>>,
   mut chunks: Query<(&VoxelChunk, &mut MeshMaterial3d<StandardMaterial>)>,
 ) {
-  if settings.lod_colors_enabled == settings.prev_lod_colors_enabled {
+  if !settings.current.lod_colors_changed(&settings.prev) {
     return;
   }
-  settings.prev_lod_colors_enabled = settings.lod_colors_enabled;
+  settings.prev.lod_colors_enabled = settings.current.lod_colors_enabled;
 
   let Some(lod_materials) = lod_materials else {
     return;
   };
 
   for (chunk, mut material) in &mut chunks {
-    material.0 = lod_materials.get(chunk.node.lod, settings.lod_colors_enabled);
+    material.0 = lod_materials.get(chunk.node.lod, settings.current.lod_colors_enabled);
   }
 }
 
@@ -850,6 +945,7 @@ fn rebuild_world(
 	chunks: Query<Entity, With<VoxelChunk>>,
 	settings: Res<UiSettings>,
 	lod_materials: Option<Res<LodMaterials>>,
+	terrain_material: Option<Res<TerrainMaterial>>,
 	mut world_roots: Query<&mut VoxelWorldRoot>,
 	mut chunk_map: Option<ResMut<ChunkEntityMap>>,
 	mut world_chunk_map: ResMut<WorldChunkMap>,
@@ -859,8 +955,8 @@ fn rebuild_world(
 	};
 
 	info!(
-		"[NoiseLod] Rebuilding world with seed: {}, noise: {:?}",
-		event.seed, event.sampler_source
+		"[NoiseLod] Rebuilding world with seed: {}, noise: {:?}, triplanar: {}",
+		event.seed, event.sampler_source, settings.current.use_triplanar
 	);
 
 	// Despawn all existing chunks
@@ -899,18 +995,18 @@ fn rebuild_world(
 	world_root.world.sampler = create_sampler(event.sampler_source, event.seed);
 
 	// Create new config from current UI settings
-	let world_half_extent = settings.world_half_extent;
+	let world_half_extent = settings.current.world_half_extent;
 	let world_bounds = DAabb3::from_center_half_extents(
 		DVec3::ZERO,
 		DVec3::new(world_half_extent, world_half_extent, world_half_extent),
 	);
 
 	let config = OctreeConfig {
-		voxel_size: settings.voxel_size,
+		voxel_size: settings.current.voxel_size,
 		world_origin: DVec3::new(-world_half_extent, -world_half_extent, -world_half_extent),
-		min_lod: settings.min_lod,
-		max_lod: settings.max_lod,
-		lod_exponent: settings.lod_exponent,
+		min_lod: settings.current.min_lod,
+		max_lod: settings.current.max_lod,
+		lod_exponent: settings.current.lod_exponent,
 		world_bounds: Some(world_bounds),
 	};
 
@@ -922,7 +1018,8 @@ fn rebuild_world(
 	world_root.world.leaves = initial_leaves.into();
 
 	let leaf_nodes: Vec<_> = world_root.world.leaves.iter().copied().collect();
-  let use_lod_colors = settings.lod_colors_enabled;
+  let use_lod_colors = settings.current.lod_colors_enabled;
+  let use_triplanar = settings.current.use_triplanar && terrain_material.is_some();
 
   // Parallel: sample noise and generate meshes
   let chunk_meshes: Vec<_> = leaf_nodes
@@ -964,22 +1061,36 @@ fn rebuild_world(
 
   // Sequential: spawn entities
   for (node, output) in chunk_meshes {
-    spawn_chunk_entity_with_marker(
-      &mut commands,
-      &mut meshes,
-      lod_materials.get(node.lod, use_lod_colors),
-      chunk_map_ref,
-      &mut world_chunk_map,
-      world_id,
-      node,
-      &output,
-      &config,
-    );
+    if use_triplanar {
+      spawn_triplanar_chunk_entity_with_marker(
+        &mut commands,
+        &mut meshes,
+        terrain_material.as_ref().unwrap().handle.clone(),
+        chunk_map_ref,
+        &mut world_chunk_map,
+        world_id,
+        node,
+        &output,
+        &config,
+      );
+    } else {
+      spawn_chunk_entity_with_marker(
+        &mut commands,
+        &mut meshes,
+        lod_materials.get(node.lod, use_lod_colors),
+        chunk_map_ref,
+        &mut world_chunk_map,
+        world_id,
+        node,
+        &output,
+        &config,
+      );
+    }
   }
 
   info!(
-    "[NoiseLod] Rebuilt world: {} meshes, {} empty chunks",
-    mesh_count, empty_count
+    "[NoiseLod] Rebuilt world: {} meshes, {} empty chunks (triplanar: {})",
+    mesh_count, empty_count, use_triplanar
   );
 }
 
@@ -1039,9 +1150,9 @@ fn start_refinement(
 
 	// Start async refinement + mesh generation (non-blocking)
 	// Both refine() and process_transitions() run on background thread
-	let started = match settings.sampler_source {
+	let started = match settings.current.sampler_source {
 		SamplerSource::FastNoise2 => {
-			let sampler = FastNoise2Terrain::new(settings.current_seed);
+			let sampler = FastNoise2Terrain::new(settings.current.current_seed);
 			async_state.refinement_pipeline.start(RefinementRequest {
 				world_id,
 				viewer_pos,
@@ -1117,6 +1228,7 @@ fn process_entity_queue(
 	chunks: Query<(Entity, &VoxelChunk)>,
 	settings: Res<UiSettings>,
 	lod_materials: Option<Res<LodMaterials>>,
+	terrain_material: Option<Res<TerrainMaterial>>,
 	mut chunk_map: Option<ResMut<ChunkEntityMap>>,
 	mut world_chunk_map: ResMut<WorldChunkMap>,
 	mut metrics: ResMut<VoxelMetricsResource>,
@@ -1136,7 +1248,8 @@ fn process_entity_queue(
 
 	let config = world_root.config().clone();
 	let world_id = world_root.id();
-	let use_lod_colors = settings.lod_colors_enabled;
+	let use_lod_colors = settings.current.lod_colors_enabled;
+	let use_triplanar = settings.current.use_triplanar && terrain_material.is_some();
 
 	// Build node -> entity map for despawn lookups
 	let node_to_entity: HashMap<OctreeNode, Entity> = chunks
@@ -1180,17 +1293,31 @@ fn process_entity_queue(
 				ready.output.indices.len() as u32,
 			);
 
-			spawn_chunk_entity_with_marker(
-				&mut commands,
-				&mut meshes,
-				lod_materials.get(ready.node.lod, use_lod_colors),
-				chunk_map_ref,
-				&mut world_chunk_map,
-				world_id,
-				ready.node,
-				&ready.output,
-				&config,
-			);
+			if use_triplanar {
+				spawn_triplanar_chunk_entity_with_marker(
+					&mut commands,
+					&mut meshes,
+					terrain_material.as_ref().unwrap().handle.clone(),
+					chunk_map_ref,
+					&mut world_chunk_map,
+					world_id,
+					ready.node,
+					&ready.output,
+					&config,
+				);
+			} else {
+				spawn_chunk_entity_with_marker(
+					&mut commands,
+					&mut meshes,
+					lod_materials.get(ready.node.lod, use_lod_colors),
+					chunk_map_ref,
+					&mut world_chunk_map,
+					world_id,
+					ready.node,
+					&ready.output,
+					&config,
+				);
+			}
 		}
 	});
 

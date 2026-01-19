@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 voxel_plugin = { path = "../voxel_plugin" }
-bevy = { workspace = true }
+bevy = { workspace = true, features = ["ktx2"] }
 rayon = { workspace = true }
 smallvec = "1.13"
 # WASM compat: use web_time::Instant, NOT std::time::Instant

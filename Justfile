@@ -34,3 +34,7 @@ bench:
 install-web-tools:
     cargo install trunk
     rustup target add wasm32-unknown-unknown wasm32-unknown-emscripten
+
+# Bake terrain texture arrays (KTX2)
+bake-textures:
+    cargo run -p texture_baker --release -- --config assets/terrain_textures.toml --assets-dir assets

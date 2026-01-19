@@ -128,7 +128,28 @@ impl VolumeSampler for FastNoise2Terrain {
       // Noise typically [-1, 1], scale converts to world units
       let sdf = noise[fn_idx] * self.scale;
       volume[vol_idx] = sdf_conversion::to_storage(sdf, voxel_size as f32);
-      materials[vol_idx] = 0;
+
+      // Assign material based on world height with noise variation
+      // World Y = grid_offset.y * voxel_size + local_y * voxel_size
+      let world_y = grid_offset[1] as f32 * voxel_size as f32 + y as f32 * voxel_size as f32;
+
+      // Use noise value for variation
+      let noise_val = noise[fn_idx];
+
+      // Height-based material assignment:
+      // - Layer 0 (dirt): Below -500 or underground
+      // - Layer 1 (grass): -500 to 500
+      // - Layer 2 (stone): 500 to 2000 or steep (high noise gradient)
+      // - Layer 3 (snow): Above 2000
+      materials[vol_idx] = if world_y > 2000.0 {
+        3 // Snow
+      } else if world_y > 500.0 || noise_val.abs() > 0.7 {
+        2 // Stone (high altitude or steep/complex terrain)
+      } else if world_y > -500.0 {
+        1 // Grass (mid-range)
+      } else {
+        0 // Dirt (low/underground)
+      };
     }
   }
 }

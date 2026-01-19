@@ -3,20 +3,15 @@
 //! Provides scene state machine and automatic cleanup.
 
 pub mod noise_lod;
-pub mod sdf_test;
 
 use bevy::prelude::*;
 
 /// Application scene states
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum Scene {
-  /// Main menu / scene selector
+  /// Octree LOD terrain with noise (default scene)
   #[default]
-  Menu,
-  /// Octree LOD terrain with noise
   NoiseLod,
-  /// SDF test scene (simple shapes for debugging)
-  SdfTest,
 }
 
 /// Marker component for entities that should be despawned on scene exit
@@ -30,9 +25,7 @@ impl Plugin for ScenePlugin {
   fn build(&self, app: &mut App) {
     app
       .init_state::<Scene>()
-      .add_systems(OnExit(Scene::NoiseLod), cleanup_scene)
-      .add_systems(OnExit(Scene::SdfTest), cleanup_scene)
-      .add_systems(OnExit(Scene::Menu), cleanup_scene);
+      .add_systems(OnExit(Scene::NoiseLod), cleanup_scene);
   }
 }
 
