@@ -262,6 +262,140 @@ impl VolumeSampler for BoxSampler {
   }
 }
 
+/// Metaball (blobby) SDF sampler.
+///
+/// Creates organic blob-like shapes using multiple spherical influences.
+/// Each metaball contributes `strength / distance²` to the field.
+/// The surface appears where the combined field equals the threshold.
+#[derive(Clone)]
+pub struct MetaballsSampler {
+  /// Individual metaballs
+  pub balls: Vec<Metaball>,
+  /// Field threshold for surface (default: 1.0)
+  pub threshold: f64,
+}
+
+/// A single metaball influence.
+#[derive(Clone, Copy)]
+pub struct Metaball {
+  /// Center position in world coordinates
+  pub center: [f64; 3],
+  /// Radius of influence
+  pub radius: f64,
+  /// Strength of the influence (typically 1.0)
+  pub strength: f64,
+}
+
+impl MetaballsSampler {
+  /// Create a new metaballs sampler with the given balls and threshold.
+  pub fn new(balls: Vec<Metaball>, threshold: f64) -> Self {
+    Self { balls, threshold }
+  }
+
+  /// Create a random arrangement of metaballs using a seed.
+  /// Generates `count` metaballs scattered within a bounding region.
+  pub fn random(seed: u32, count: usize, extent: f64) -> Self {
+    let mut balls = Vec::with_capacity(count);
+    let mut rng = XorShift32::new(seed);
+
+    for _ in 0..count {
+      // Random position within [-extent, extent]
+      let x = (rng.next_f64() * 2.0 - 1.0) * extent;
+      let y = (rng.next_f64() * 2.0 - 1.0) * extent;
+      let z = (rng.next_f64() * 2.0 - 1.0) * extent;
+
+      // Random radius [extent * 0.1, extent * 0.4]
+      let radius = extent * (0.1 + rng.next_f64() * 0.3);
+
+      balls.push(Metaball {
+        center: [x, y, z],
+        radius,
+        strength: 1.0,
+      });
+    }
+
+    Self {
+      balls,
+      threshold: 1.0,
+    }
+  }
+}
+
+impl VolumeSampler for MetaballsSampler {
+  fn sample_volume(
+    &self,
+    grid_offset: [i64; 3],
+    voxel_size: f64,
+    volume: &mut [SdfSample; SAMPLE_SIZE_CB],
+    materials: &mut [MaterialId; SAMPLE_SIZE_CB],
+  ) {
+    for xi in 0..SAMPLE_SIZE {
+      for yi in 0..SAMPLE_SIZE {
+        for zi in 0..SAMPLE_SIZE {
+          // World position = (grid_offset + sample_index) * voxel_size
+          let wx = (grid_offset[0] + xi as i64) as f64 * voxel_size;
+          let wy = (grid_offset[1] + yi as i64) as f64 * voxel_size;
+          let wz = (grid_offset[2] + zi as i64) as f64 * voxel_size;
+
+          // Compute combined metaball field value
+          let mut field = 0.0;
+          for ball in &self.balls {
+            let dx = wx - ball.center[0];
+            let dy = wy - ball.center[1];
+            let dz = wz - ball.center[2];
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+
+            // Avoid division by zero, use ball radius squared as falloff
+            let r_sq = ball.radius * ball.radius;
+            if dist_sq < r_sq * 0.01 {
+              // Very close to center - large contribution
+              field += ball.strength * 100.0;
+            } else {
+              // Standard metaball falloff: strength * (r² / d²)
+              field += ball.strength * r_sq / dist_sq;
+            }
+          }
+
+          // Convert to SDF: negative inside (field > threshold), positive outside
+          // Approximate distance using threshold crossing
+          let sdf = self.threshold - field;
+
+          let idx = xi * SAMPLE_SIZE * SAMPLE_SIZE + yi * SAMPLE_SIZE + zi;
+          volume[idx] = sdf_conversion::to_storage(sdf as f32, voxel_size as f32);
+          materials[idx] = 0;
+        }
+      }
+    }
+  }
+}
+
+/// Simple xorshift32 PRNG for deterministic random generation.
+struct XorShift32 {
+  state: u32,
+}
+
+impl XorShift32 {
+  fn new(seed: u32) -> Self {
+    // Ensure non-zero state
+    Self {
+      state: if seed == 0 { 1 } else { seed },
+    }
+  }
+
+  fn next(&mut self) -> u32 {
+    let mut x = self.state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    self.state = x;
+    x
+  }
+
+  fn next_f64(&mut self) -> f64 {
+    self.next() as f64 / u32::MAX as f64
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -308,5 +442,39 @@ mod tests {
     let has_positive = volume.iter().any(|&v| v > 0);
     let has_negative = volume.iter().any(|&v| v < 0);
     assert!(has_positive && has_negative, "Ground plane should split the volume");
+  }
+
+  #[test]
+  fn metaballs_creates_surface() {
+    // Use random generation with a fixed seed for reproducibility
+    let sampler = MetaballsSampler::random(42, 5, 20.0);
+    let mut volume = [0i8; SAMPLE_SIZE_CB];
+    let mut materials = [0u8; SAMPLE_SIZE_CB];
+
+    // Sample around origin where metaballs should be
+    sampler.sample_volume([-16, -16, -16], 1.0, &mut volume, &mut materials);
+
+    // Should have both inside (negative) and outside (positive)
+    let has_positive = volume.iter().any(|&v| v > 0);
+    let has_negative = volume.iter().any(|&v| v < 0);
+    assert!(
+      has_positive && has_negative,
+      "Metaballs surface should cross the volume"
+    );
+  }
+
+  #[test]
+  fn metaballs_deterministic() {
+    // Same seed should produce same results
+    let sampler1 = MetaballsSampler::random(123, 3, 10.0);
+    let sampler2 = MetaballsSampler::random(123, 3, 10.0);
+
+    assert_eq!(sampler1.balls.len(), sampler2.balls.len());
+    for (b1, b2) in sampler1.balls.iter().zip(sampler2.balls.iter()) {
+      assert_eq!(b1.center[0], b2.center[0]);
+      assert_eq!(b1.center[1], b2.center[1]);
+      assert_eq!(b1.center[2], b2.center[2]);
+      assert_eq!(b1.radius, b2.radius);
+    }
   }
 }

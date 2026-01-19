@@ -4,6 +4,8 @@ members = [
 	"crates/voxel_game",
 	"crates/voxel_bevy",
 	"crates/voxel_noise",
+	"crates/texture_baker",
+	"crates/voxel_unity",
 ]
 resolver = "2"
 
