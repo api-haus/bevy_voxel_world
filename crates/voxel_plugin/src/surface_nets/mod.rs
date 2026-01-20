@@ -681,11 +681,11 @@ fn emit_triangles(
       // Split along A-B diagonal
       if flip {
         output.indices.extend_from_slice(&[
-          v_a as u32, v_b as u32, v_c as u32, v_a as u32, v_d as u32, v_b as u32,
+          v_a as u16, v_b as u16, v_c as u16, v_a as u16, v_d as u16, v_b as u16,
         ]);
       } else {
         output.indices.extend_from_slice(&[
-          v_a as u32, v_b as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32,
+          v_a as u16, v_b as u16, v_d as u16, v_a as u16, v_c as u16, v_b as u16,
         ]);
       }
     } else {
@@ -693,12 +693,12 @@ fn emit_triangles(
       if flip {
         // CCW winding: (C,A,D), (D,B,C)
         output.indices.extend_from_slice(&[
-          v_c as u32, v_a as u32, v_d as u32, v_d as u32, v_b as u32, v_c as u32,
+          v_c as u16, v_a as u16, v_d as u16, v_d as u16, v_b as u16, v_c as u16,
         ]);
       } else {
         // CW winding: (C,D,A), (C,B,D)
         output.indices.extend_from_slice(&[
-          v_c as u32, v_d as u32, v_a as u32, v_c as u32, v_b as u32, v_d as u32,
+          v_c as u16, v_d as u16, v_a as u16, v_c as u16, v_b as u16, v_d as u16,
         ]);
       }
     }

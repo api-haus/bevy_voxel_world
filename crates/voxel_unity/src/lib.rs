@@ -116,8 +116,8 @@ pub struct FfiChunkPresentation {
     pub vertices_ptr: *const Vertex,
     /// Number of vertices
     pub vertices_count: u32,
-    /// Pointer to index data
-    pub indices_ptr: *const u32,
+    /// Pointer to index data (u16 since 32³ volume has at most 32,768 vertices)
+    pub indices_ptr: *const u16,
     /// Number of indices
     pub indices_count: u32,
 }
@@ -169,7 +169,7 @@ unsafe impl Sync for FfiPresentationBatch {}
 pub struct FfiMeshResult {
     pub vertices_ptr: *const Vertex,
     pub vertices_count: u32,
-    pub indices_ptr: *const u32,
+    pub indices_ptr: *const u16,
     pub indices_count: u32,
 }
 
@@ -228,7 +228,7 @@ struct RetainedChunk {
     world_pos: DVec3,
     scale: f64,
     vertices: Vec<Vertex>,
-    indices: Vec<u32>,
+    indices: Vec<u16>,
 }
 
 /// Retained transition group data for pointer validity across FFI boundary.

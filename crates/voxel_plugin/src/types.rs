@@ -166,7 +166,8 @@ pub struct MeshOutput {
   pub vertices: Vec<Vertex>,
 
   /// Triangle indices (3 indices per triangle).
-  pub indices: Vec<u32>,
+  /// Uses u16 since Surface Nets on 32³ volume produces at most 32,768 vertices.
+  pub indices: Vec<u16>,
 
   /// Displaced positions for LOD seam vertices (parallel to vertices).
   pub displaced_positions: Vec<[f32; 3]>,

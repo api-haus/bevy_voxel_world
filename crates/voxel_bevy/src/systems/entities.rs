@@ -149,7 +149,7 @@ pub fn mesh_output_to_bevy(output: &MeshOutput) -> Mesh {
   mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
   // Material blend weights stored as vertex color (RGBA = 4 layer weights)
   mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, material_weights);
-  mesh.insert_indices(Indices::U32(output.indices.clone()));
+  mesh.insert_indices(Indices::U16(output.indices.clone()));
 
   mesh
 }
