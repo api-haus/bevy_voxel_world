@@ -7,10 +7,6 @@ unity-plugin:
     cp target/release/libvoxel_unity.so ../Packages/im.pala.voxelmission/Plugins/x86_64/
     @echo "Deployed libvoxel_unity.so to Unity Plugins"
 
-# Run voxel_unity tests
-test-unity:
-    cargo test -p voxel_unity
-
 # Build all crates
 build-all:
     cargo build --workspace --release
@@ -18,6 +14,10 @@ build-all:
 # Run all tests
 test-all:
     cargo test --workspace
+
+# Run all benchmarks
+bench-all:
+    cargo bench --workspace
 
 # Bake terrain texture arrays (KTX2)
 bake-textures:
