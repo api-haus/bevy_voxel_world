@@ -16,6 +16,9 @@ wasm-atomics = ["voxel_bevy/wasm-atomics"]
 trace_tracy = ["voxel_bevy/trace_tracy"]
 # Metrics collection (enabled by default)
 metrics = ["voxel_bevy/debug_ui"]
+# Enable WebGPU backend for WASM (instead of WebGL2)
+# Note: WebGPU requires Chrome 113+ or other WebGPU-capable browsers
+webgpu = ["bevy/webgpu"]
 
 [dependencies]
 voxel_plugin = { path = "../voxel_plugin" }

@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use super::types::{PresampleOutput, SampledVolume, VolumeSampler, WorkSource};
 use crate::constants::SAMPLE_SIZE_CB;
-use crate::noise::is_homogeneous;
+use crate::noise::has_surface_crossing;
 use crate::octree::{OctreeConfig, OctreeNode};
 
 /// Sample the full 32³ volume for a node using VolumeSampler.
@@ -54,10 +54,10 @@ pub fn presample_node<S: VolumeSampler>(
 ) -> PresampleOutput {
   let sampled = sample_volume_for_node(&node, sampler, config);
 
-  let volume = if is_homogeneous(&sampled.volume) {
-    None
-  } else {
+  let volume = if has_surface_crossing(&sampled.volume) {
     Some(sampled)
+  } else {
+    None // Skip - no surface crossings
   };
 
   PresampleOutput {

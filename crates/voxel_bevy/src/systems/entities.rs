@@ -2,6 +2,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::pbr::Material;
 use bevy::prelude::*;
 use voxel_plugin::octree::{OctreeConfig, OctreeNode};
 use voxel_plugin::types::MeshOutput;
@@ -9,7 +10,6 @@ use voxel_plugin::world::WorldId;
 
 use crate::components::VoxelChunk;
 use crate::resources::ChunkEntityMap;
-use crate::triplanar_material::TriplanarMaterial;
 use crate::world::WorldChunkMap;
 
 /// Material blend weights are stored in vertex color (RGBA = 4 layer weights).
@@ -75,14 +75,14 @@ pub fn spawn_chunk_entity(
   entity
 }
 
-/// Spawn a mesh entity with triplanar material for an octree node.
+/// Spawn a mesh entity with a custom material for an octree node.
 ///
-/// Similar to `spawn_chunk_entity` but uses the triplanar PBR material
-/// for terrain texturing with 4-layer blending.
-pub fn spawn_triplanar_chunk_entity(
+/// Generic version that works with any Material type (e.g., triplanar terrain materials).
+/// Material blend weights are passed via vertex colors.
+pub fn spawn_custom_material_chunk_entity<M: Material>(
   commands: &mut Commands,
   meshes: &mut Assets<Mesh>,
-  material: Handle<TriplanarMaterial>,
+  material: Handle<M>,
   chunk_map: &mut ChunkEntityMap,
   world_chunk_map: Option<&mut WorldChunkMap>,
   world_id: WorldId,

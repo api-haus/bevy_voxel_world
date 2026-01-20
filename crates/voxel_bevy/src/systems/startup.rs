@@ -1,8 +1,11 @@
 //! Startup system for octree scene initialization.
+//!
+//! Note: This is a legacy demo system. Games should implement their own scene setup
+//! with custom materials rather than using this.
 
 use bevy::prelude::*;
 use rayon::prelude::*;
-use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
+use voxel_plugin::noise::{has_surface_crossing, FastNoise2Terrain};
 use voxel_plugin::octree::{refine, OctreeConfig, OctreeLeaves, RefinementBudget, RefinementInput};
 use voxel_plugin::pipeline::sample_volume_for_node;
 use voxel_plugin::surface_nets;
@@ -13,11 +16,28 @@ use voxel_plugin::world::WorldId;
 type DVec3 = bevy::math::DVec3;
 
 use crate::input::fly_camera_input_bundle;
-use crate::resources::{ChunkEntityMap, LodMaterials, OctreeLodState, TerrainMaterial};
+use crate::resources::{ChunkEntityMap, OctreeLodState};
 use crate::systems::entities::spawn_chunk_entity;
 use crate::systems::meshing::compute_neighbor_mask;
-use crate::triplanar_material::{create_placeholder_material, TriplanarMaterial};
 use crate::FlyCamera;
+
+/// Resource containing LOD-colored materials for visualization (local to this demo).
+#[derive(Resource)]
+struct LodMaterials {
+  materials: Vec<Handle<StandardMaterial>>,
+  neutral: Handle<StandardMaterial>,
+}
+
+impl LodMaterials {
+  fn get(&self, lod: i32, use_lod_colors: bool) -> Handle<StandardMaterial> {
+    if use_lod_colors {
+      let idx = (lod as usize).min(self.materials.len() - 1);
+      self.materials[idx].clone()
+    } else {
+      self.neutral.clone()
+    }
+  }
+}
 
 /// Initial LOD for octree (will refine from here).
 const INITIAL_LOD: i32 = 4;
@@ -26,12 +46,13 @@ const INITIAL_LOD: i32 = 4;
 const MAX_STARTUP_ITERATIONS: usize = 10;
 
 /// Startup system: pre-compute octree refinement and spawn all meshes.
+///
+/// Note: This is a legacy demo using StandardMaterial. Games should implement their own
+/// scene setup with custom materials (e.g., triplanar terrain materials).
 pub fn setup_octree_scene(
   mut commands: Commands,
   mut meshes: ResMut<Assets<Mesh>>,
   mut materials: ResMut<Assets<StandardMaterial>>,
-  mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
-  mut images: ResMut<Assets<Image>>,
 ) {
   info!("Setting up octree scene...");
 
@@ -134,13 +155,6 @@ pub fn setup_octree_scene(
     }
   };
 
-  // 5b. Create triplanar terrain material with placeholder textures
-  let terrain_material = {
-    let mat = create_placeholder_material(&mut images);
-    let handle = triplanar_materials.add(mat);
-    TerrainMaterial { handle }
-  };
-
   // 6. Generate meshes for all leaves (parallel noise + meshing)
   let mut chunk_map = ChunkEntityMap::default();
 
@@ -154,8 +168,8 @@ pub fn setup_octree_scene(
       // Use centralized sampling helper (handles apron offset)
       let sampled = sample_volume_for_node(node, &sampler, &config);
 
-      if is_homogeneous(&sampled.volume) {
-        return None;
+      if !has_surface_crossing(&sampled.volume) {
+        return None; // Skip - no surface crossings
       }
 
       let neighbor_mask = compute_neighbor_mask(node, &leaves, &config);
@@ -205,7 +219,6 @@ pub fn setup_octree_scene(
   commands.insert_resource(OctreeLodState { leaves, config });
   commands.insert_resource(chunk_map);
   commands.insert_resource(lod_materials);
-  commands.insert_resource(terrain_material);
 
   // 8. Setup camera and lights
   setup_camera_and_lights(&mut commands);

@@ -1,0 +1,42 @@
+# Terrain Texture Array Configuration
+# Run `just bake-textures` to build KTX2 arrays
+
+output_dir = "../crates/voxel_game/assets/textures/terrain"
+output_size = 1024  # All textures resized to 1024x1024
+
+# Layer 0: Grass (low areas, flat terrain)
+[[layers]]
+name = "grass"
+diffuse = "sources/textures/Stylized_Grass_002_4K/Stylized_Grass_002_color.png"
+height = "sources/textures/Stylized_Grass_002_4K/Stylized_Grass_002_height.png"
+normal = "sources/textures/Stylized_Grass_002_4K/Stylized_Grass_002_normal.png"
+roughness = "sources/textures/Stylized_Grass_002_4K/Stylized_Grass_002_roughness.png"
+ao = "sources/textures/Stylized_Grass_002_4K/Stylized_Grass_002_ambientOcclusion.png"
+
+# Layer 1: Ground/Dirt (medium elevation)
+[[layers]]
+name = "ground"
+diffuse = "sources/textures/Stylized_Ground_002_4K/Stylized_Ground_002_basecolor.png"
+height = "sources/textures/Stylized_Ground_002_4K/Stylized_Ground_002_height.png"
+normal = "sources/textures/Stylized_Ground_002_4K/Stylized_Ground_002_normal.png"
+roughness = "sources/textures/Stylized_Ground_002_4K/Stylized_Ground_002_roughness.png"
+ao = "sources/textures/Stylized_Ground_002_4K/Stylized_Ground_002_ambientOcclusion.png"
+
+# Layer 2: Cliff Rocks (steep slopes)
+[[layers]]
+name = "rock"
+diffuse = "sources/textures/cliff_rocks_04_4k/cliff_rocks_04_baseColor_4k.png"
+height = "sources/textures/cliff_rocks_04_4k/cliff_rocks_04_height_4k.png"
+normal = "sources/textures/cliff_rocks_04_4k/cliff_rocks_04_normal_gl_4k.png"
+roughness = "sources/textures/cliff_rocks_04_4k/cliff_rocks_04_roughness_4k.png"
+ao = "sources/textures/cliff_rocks_04_4k/cliff_rocks_04_ambientOcclusion_4k.png"
+metallic = "sources/textures/cliff_rocks_04_4k/cliff_rocks_04_metallic_4k.png"
+
+# Layer 3: Snow (high altitude)
+[[layers]]
+name = "snow"
+diffuse = "sources/textures/snow_01_4k/snow_01_color_4k.png"
+height = "sources/textures/snow_01_4k/snow_01_height_4k.png"
+normal = "sources/textures/snow_01_4k/snow_01_normal_gl_4k.png"
+roughness = "sources/textures/snow_01_4k/snow_01_roughness_4k.png"
+ao = "sources/textures/snow_01_4k/snow_01_ambient_occlusion_4k.png"

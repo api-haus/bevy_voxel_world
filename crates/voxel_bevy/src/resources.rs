@@ -6,32 +6,6 @@ use bevy::prelude::*;
 use voxel_plugin::metrics::WorldMetrics;
 use voxel_plugin::octree::{OctreeConfig, OctreeLeaves, OctreeNode};
 
-use crate::triplanar_material::TriplanarMaterial;
-
-/// Resource containing LOD-colored materials for visualization.
-#[derive(Resource)]
-pub struct LodMaterials {
-  pub materials: Vec<Handle<StandardMaterial>>,
-  pub neutral: Handle<StandardMaterial>,
-}
-
-impl LodMaterials {
-  /// Get material for a given LOD level.
-  pub fn get(&self, lod: i32, use_lod_colors: bool) -> Handle<StandardMaterial> {
-    if use_lod_colors {
-      let idx = (lod as usize).min(self.materials.len() - 1);
-      self.materials[idx].clone()
-    } else {
-      self.neutral.clone()
-    }
-  }
-}
-
-/// Resource containing the triplanar terrain material.
-#[derive(Resource)]
-pub struct TerrainMaterial {
-  pub handle: Handle<TriplanarMaterial>,
-}
 
 /// Resource containing octree LOD state.
 #[derive(Resource)]

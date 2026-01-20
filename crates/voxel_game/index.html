@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta content="width=device-width, initial-scale=1.0" name="viewport">
-  <title>Voxel Game - Metaballs Demo</title>
+  <title>Voxel Game</title>
   <style>
     html, body {
       margin: 0;
@@ -37,7 +37,10 @@
   <!-- JS bridge for FastNoise2 (auto-initializes in each worker) -->
   <link data-target-path="js" data-trunk href="../voxel_noise/js" rel="copy-dir"/>
 
-  <link data-trunk data-wasm-opt="0" rel="rust"/>
+  <!-- Bevy assets (textures, shaders loaded via AssetServer) -->
+  <link data-target-path="assets" data-trunk href="assets" rel="copy-dir"/>
+
+  <link data-trunk data-wasm-opt="0" data-cargo-no-default-features="" rel="rust"/>
 </head>
 <body>
 </body>

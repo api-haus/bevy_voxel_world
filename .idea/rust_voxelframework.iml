@@ -15,6 +15,8 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/voxel_plugin/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/voxel_noise/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/voxel_noise/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/texture_baker/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/voxel_unity/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.claude/cache" />
       <excludeFolder url="file://$MODULE_DIR$/.claude/tsc-cache" />
       <excludeFolder url="file://$MODULE_DIR$/target" />

@@ -17,6 +17,9 @@ use bevy::prelude::*;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::{light_consts::lux, CascadeShadowConfigBuilder};
+// Atmosphere requires storage buffers in fragment shaders - not available on WebGL2
+// Available on: native, or WASM with webgpu feature
+#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu"))]
 use bevy::pbr::{Atmosphere, AtmosphereSettings, ScatteringMedium};
 use bevy::post_process::bloom::Bloom;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -27,14 +30,14 @@ use voxel_bevy::components::{VoxelChunk, VoxelViewer};
 use voxel_bevy::entity_queue::{EntityQueue, EntityQueueConfig};
 use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
 use voxel_bevy::input::{fly_camera_input_bundle, CameraInputContext};
-use voxel_bevy::resources::{ChunkEntityMap, LodMaterials, TerrainMaterial, VoxelMetricsResource};
-use voxel_bevy::systems::entities::{spawn_chunk_entity, spawn_triplanar_chunk_entity};
+use voxel_bevy::resources::{ChunkEntityMap, VoxelMetricsResource};
+use voxel_bevy::systems::entities::{spawn_chunk_entity, spawn_custom_material_chunk_entity};
 use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
-use voxel_bevy::{load_baked_terrain_material, TriplanarMaterial};
+use crate::triplanar_material::{load_baked_terrain_material, LodMaterials, TerrainMaterial, TriplanarMaterial, TriplanarMaterialPlugin};
 #[cfg(feature = "metrics")]
 use voxel_bevy::debug_ui::voxel_metrics_ui;
-use voxel_plugin::noise::{is_homogeneous, FastNoise2Terrain};
+use voxel_plugin::noise::{has_surface_crossing, FastNoise2Terrain};
 use voxel_plugin::octree::{
 	DAabb3, OctreeConfig, OctreeNode, RefinementBudget, TransitionGroup, TransitionType,
 };
@@ -57,7 +60,7 @@ pub struct NoiseLodPlugin;
 impl Plugin for NoiseLodPlugin {
   fn build(&self, app: &mut App) {
     app
-      .add_plugins(voxel_bevy::TriplanarMaterialPlugin)
+      .add_plugins(TriplanarMaterialPlugin)
       .init_resource::<UiSettings>()
       .init_resource::<WorldChunkMap>()
       .init_resource::<AsyncRefinementState>()
@@ -250,6 +253,8 @@ struct InitialMeshGenEvent;
 // Setup
 // =============================================================================
 
+// Setup with atmosphere (native or WASM+WebGPU)
+#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu"))]
 fn setup(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
@@ -260,6 +265,61 @@ fn setup(
 	mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
 	camera_query: Query<Entity, With<crate::MainCamera>>,
 	settings: Res<UiSettings>,
+) {
+	setup_inner(
+		&mut commands,
+		&mut meshes,
+		&mut materials,
+		&mut triplanar_materials,
+		&asset_server,
+		&mut initial_gen_events,
+		&camera_query,
+		&settings,
+	);
+	setup_camera_and_lights(&mut commands, &mut scattering_mediums, &camera_query);
+	spawn_scale_reference_poles(&mut commands, &mut meshes, &mut materials);
+	initial_gen_events.write(InitialMeshGenEvent);
+	info!("[NoiseLod] Scene setup complete - generating initial meshes...");
+}
+
+// Setup without atmosphere (WASM+WebGL2 - no storage buffer support)
+#[cfg(all(target_arch = "wasm32", not(feature = "webgpu")))]
+fn setup(
+	mut commands: Commands,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut materials: ResMut<Assets<StandardMaterial>>,
+	mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
+	asset_server: Res<AssetServer>,
+	mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
+	camera_query: Query<Entity, With<crate::MainCamera>>,
+	settings: Res<UiSettings>,
+) {
+	setup_inner(
+		&mut commands,
+		&mut meshes,
+		&mut materials,
+		&mut triplanar_materials,
+		&asset_server,
+		&mut initial_gen_events,
+		&camera_query,
+		&settings,
+	);
+	setup_camera_and_lights(&mut commands, &camera_query);
+	spawn_scale_reference_poles(&mut commands, &mut meshes, &mut materials);
+	initial_gen_events.write(InitialMeshGenEvent);
+	info!("[NoiseLod] Scene setup complete - generating initial meshes...");
+}
+
+#[allow(clippy::too_many_arguments)]
+fn setup_inner(
+	commands: &mut Commands,
+	_meshes: &mut Assets<Mesh>,
+	materials: &mut Assets<StandardMaterial>,
+	triplanar_materials: &mut Assets<TriplanarMaterial>,
+	asset_server: &AssetServer,
+	_initial_gen_events: &mut MessageWriter<InitialMeshGenEvent>,
+	_camera_query: &Query<Entity, With<crate::MainCamera>>,
+	settings: &UiSettings,
 ) {
 	info!("[NoiseLod] Setting up octree scene (async)...");
 
@@ -298,11 +358,11 @@ fn setup(
   );
 
   // 4. Create per-LOD materials
-  let lod_materials = create_lod_materials(&mut materials);
+  let lod_materials = create_lod_materials(materials);
 
   // 4b. Load baked triplanar terrain material
   let terrain_material = {
-    let handle = load_baked_terrain_material(&asset_server, &mut triplanar_materials);
+    let handle = load_baked_terrain_material(asset_server, triplanar_materials);
     TerrainMaterial { handle }
   };
 
@@ -313,17 +373,6 @@ fn setup(
   commands.insert_resource(ChunkEntityMap::default());
   commands.insert_resource(lod_materials);
   commands.insert_resource(terrain_material);
-
-	// 7. Setup camera and lights immediately
-	setup_camera_and_lights(&mut commands, &mut scattering_mediums, &camera_query);
-
-	// 8. Spawn scale reference poles
-	spawn_scale_reference_poles(&mut commands, &mut meshes, &mut materials);
-
-	// 9. Trigger initial mesh generation for starting leaves
-	initial_gen_events.write(InitialMeshGenEvent);
-
-	info!("[NoiseLod] Scene setup complete - generating initial meshes...");
 }
 
 /// System to generate meshes for initial leaves (runs once at startup).
@@ -552,8 +601,8 @@ fn spawn_triplanar_chunk_entity_with_marker(
   output: &voxel_plugin::MeshOutput,
   config: &OctreeConfig,
 ) {
-  // Use the triplanar spawn function but add SceneEntity
-  spawn_triplanar_chunk_entity(
+  // Use the generic spawn function with TriplanarMaterial
+  spawn_custom_material_chunk_entity(
     commands,
     meshes,
     material,
@@ -571,83 +620,124 @@ fn spawn_triplanar_chunk_entity_with_marker(
   }
 }
 
-/// Setup camera and lighting with atmospheric scattering
+/// Setup camera and lighting with atmospheric scattering (native or WASM+WebGPU)
+#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu"))]
 fn setup_camera_and_lights(
   commands: &mut Commands,
   scattering_mediums: &mut Assets<ScatteringMedium>,
   camera_query: &Query<Entity, With<crate::MainCamera>>,
 ) {
-  // Configure existing main camera with FlyCamera, VoxelViewer, and Atmosphere
-  // Position camera above terrain (world is centered at origin, spans -50k to +50k)
+  let camera_entity = get_or_spawn_camera(commands, camera_query);
+  let (camera_pos, yaw, pitch) = camera_transform();
 
-  // Get or spawn camera entity
-  // Note: MainCamera might not exist yet due to Bevy's schedule order (OnEnter can run before Startup)
-  let camera_entity = if let Ok(entity) = camera_query.single() {
+  commands.entity(camera_entity).insert((
+    Transform::from_translation(camera_pos)
+      .with_rotation(Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)),
+    fly_camera_input_bundle(FlyCamera {
+      speed: 50.0,
+      mouse_sensitivity: 0.003,
+      gamepad_sensitivity: 2.0,
+      yaw,
+      pitch,
+    }),
+    VoxelViewer,
+    // Earthlike atmosphere - physically-based atmospheric scattering
+    Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
+    AtmosphereSettings::default(),
+    // Higher exposure to compensate for bright raw sunlight illuminance
+    Exposure { ev100: 13.0 },
+    Tonemapping::AcesFitted,
+    Bloom::NATURAL,
+  ));
+
+  spawn_sun_and_shadows(commands);
+  // Disable ambient light - atmosphere provides ambient via IBL
+  commands.insert_resource(GlobalAmbientLight::NONE);
+}
+
+/// Setup camera and lighting for WASM+WebGL2 (no atmosphere - requires storage buffers not available)
+#[cfg(all(target_arch = "wasm32", not(feature = "webgpu")))]
+fn setup_camera_and_lights(
+  commands: &mut Commands,
+  camera_query: &Query<Entity, With<crate::MainCamera>>,
+) {
+  let camera_entity = get_or_spawn_camera(commands, camera_query);
+  let (camera_pos, yaw, pitch) = camera_transform();
+
+  commands.entity(camera_entity).insert((
+    Transform::from_translation(camera_pos)
+      .with_rotation(Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)),
+    fly_camera_input_bundle(FlyCamera {
+      speed: 50.0,
+      mouse_sensitivity: 0.003,
+      gamepad_sensitivity: 2.0,
+      yaw,
+      pitch,
+    }),
+    VoxelViewer,
+    // Lower exposure for non-atmospheric rendering
+    Exposure { ev100: 10.0 },
+    Tonemapping::AcesFitted,
+    Bloom::NATURAL,
+  ));
+
+  spawn_sun_and_shadows(commands);
+  // Use ambient light since we don't have atmosphere for IBL
+  commands.insert_resource(GlobalAmbientLight {
+    color: Color::srgb(0.5, 0.6, 0.8),
+    brightness: 500.0, // Moderate ambient
+    ..default()
+  });
+}
+
+/// Get existing MainCamera or spawn a new one
+fn get_or_spawn_camera(
+  commands: &mut Commands,
+  camera_query: &Query<Entity, With<crate::MainCamera>>,
+) -> Entity {
+  if let Ok(entity) = camera_query.single() {
     info!("[NoiseLod] Found existing MainCamera entity {:?}", entity);
     entity
   } else {
     info!("[NoiseLod] MainCamera not found, spawning new camera");
     commands.spawn((Camera3d::default(), crate::MainCamera)).id()
-  };
+  }
+}
 
+/// Calculate camera position and orientation
+fn camera_transform() -> (Vec3, f32, f32) {
   // Position camera above terrain center, looking down at slight angle
-    // World extends ~100k units from origin; start near center
-    let camera_pos = Vec3::new(0.0, 2000.0, 5000.0);
-    let look_target = Vec3::new(0.0, 0.0, 0.0);
+  // World extends ~100k units from origin; start near center
+  let camera_pos = Vec3::new(0.0, 2000.0, 5000.0);
+  let look_target = Vec3::new(0.0, 0.0, 0.0);
 
-    // Calculate initial yaw/pitch from direction to target
-    let dir = (look_target - camera_pos).normalize();
-    let yaw = (-dir.x).atan2(-dir.z); // Yaw: angle in XZ plane
-    let pitch = (-dir.y).asin(); // Pitch: angle from horizontal
+  // Calculate initial yaw/pitch from direction to target
+  let dir = (look_target - camera_pos).normalize();
+  let yaw = (-dir.x).atan2(-dir.z);
+  let pitch = (-dir.y).asin();
 
-    commands.entity(camera_entity).insert((
-      Transform::from_translation(camera_pos)
-        .with_rotation(Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)),
-      fly_camera_input_bundle(FlyCamera {
-        speed: 50.0,
-        mouse_sensitivity: 0.003,
-        gamepad_sensitivity: 2.0,
-        yaw,
-        pitch,
-      }),
-      VoxelViewer,
-      // Earthlike atmosphere - physically-based atmospheric scattering
-      Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
-      // Atmosphere rendering settings (defaults work well)
-      AtmosphereSettings::default(),
-      // Higher exposure to compensate for bright raw sunlight illuminance
-      Exposure { ev100: 13.0 },
-      // Natural-looking tonemapping
-      Tonemapping::AcesFitted,
-      // Bloom for natural sun glow
-      Bloom::NATURAL,
-    ));
+  (camera_pos, yaw, pitch)
+}
 
-  // Configure cascade shadow map scaled for large terrain (units in meters/kilometers)
+/// Spawn sun directional light with cascade shadows
+fn spawn_sun_and_shadows(commands: &mut Commands) {
   let cascade_shadow_config = CascadeShadowConfigBuilder {
-    first_cascade_far_bound: 500.0, // First cascade 500 units
-    maximum_distance: 50000.0,      // Cover terrain up to 50km
+    first_cascade_far_bound: 500.0,
+    maximum_distance: 50000.0,
     ..default()
   }
   .build();
 
-  // Directional light (sun) with RAW_SUNLIGHT for proper atmosphere interaction
   commands.spawn((
     DirectionalLight {
-      // RAW_SUNLIGHT is the proper input for atmosphere scattering -
-      // it's the sun's illuminance before being filtered by atmosphere
       illuminance: lux::RAW_SUNLIGHT,
       shadows_enabled: true,
       ..default()
     },
-    // Sun position - slightly above horizon for dramatic lighting
     Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.5, 0.0)),
     cascade_shadow_config,
     SceneEntity,
   ));
-
-  // Disable ambient light - atmosphere provides ambient via IBL
-  commands.insert_resource(GlobalAmbientLight::NONE);
 }
 
 /// Number of scale reference poles to spawn
@@ -1028,8 +1118,8 @@ fn rebuild_world(
       // Use centralized sampling helper (handles apron offset)
       let sampled = sample_volume_for_node(node, sampler.as_ref(), &config);
 
-      if is_homogeneous(&sampled.volume) {
-        return None;
+      if !has_surface_crossing(&sampled.volume) {
+        return None; // Skip - no surface crossings
       }
 
       let neighbor_mask = compute_neighbor_mask(node, &world_root.world.leaves, &config);

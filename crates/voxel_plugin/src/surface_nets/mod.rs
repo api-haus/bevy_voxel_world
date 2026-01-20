@@ -296,7 +296,65 @@ pub fn generate(
     compute_normals(volume, &mut output, config);
   }
 
+  // =========================================================================
+  // Pass 4: Validation
+  // =========================================================================
+  // Return empty mesh if geometry is degenerate (prevents MeshCollider errors)
+  if !is_valid_for_collision(&output) {
+    return MeshOutput::default();
+  }
+
   output
+}
+
+/// Validate mesh has enough geometry for collision.
+///
+/// A valid mesh for collision requires:
+/// - At least 3 distinct vertices
+/// - At least 1 non-degenerate triangle (non-zero area)
+fn is_valid_for_collision(output: &MeshOutput) -> bool {
+  // Need at least 3 vertices and 1 triangle
+  if output.vertices.len() < 3 || output.indices.len() < 3 {
+    return false;
+  }
+
+  // Check for at least one non-degenerate triangle
+  const EPSILON_SQ: f32 = 1e-12;
+
+  for tri in output.indices.chunks(3) {
+    if tri.len() != 3 {
+      continue;
+    }
+
+    let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+    if i0 >= output.vertices.len() || i1 >= output.vertices.len() || i2 >= output.vertices.len() {
+      continue;
+    }
+
+    let p0 = output.vertices[i0].position;
+    let p1 = output.vertices[i1].position;
+    let p2 = output.vertices[i2].position;
+
+    // Compute cross product of edges to get triangle area * 2
+    let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+    let e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+
+    let cross = [
+      e1[1] * e2[2] - e1[2] * e2[1],
+      e1[2] * e2[0] - e1[0] * e2[2],
+      e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+
+    let area_sq = cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2];
+
+    // Found a non-degenerate triangle
+    if area_sq > EPSILON_SQ {
+      return true;
+    }
+  }
+
+  // All triangles are degenerate
+  false
 }
 
 /// Filter out triangles where ALL vertices are in the overlap region.

@@ -30,7 +30,7 @@ use super::composition::compose;
 use super::presample::sample_volume_for_node;
 use super::presentation::present;
 use super::types::{ReadyChunk, VolumeSampler, WorkSource};
-use crate::noise::is_homogeneous;
+use crate::noise::has_surface_crossing;
 use crate::octree::{OctreeConfig, OctreeNode, TransitionGroup, TransitionType};
 use crate::types::MeshConfig;
 use crate::world::WorldId;
@@ -78,7 +78,7 @@ fn compute_neighbor_mask(
   mask
 }
 
-// Note: is_homogeneous and sample_volume_for_node are imported from their
+// Note: has_surface_crossing and sample_volume_for_node are imported from their
 // canonical locations (noise module and presample module respectively)
 // to avoid code duplication.
 
@@ -130,8 +130,8 @@ pub fn process_transitions<S: VolumeSampler>(
       // Presample using centralized helper
       let sampled = sample_volume_for_node(&node, sampler, config);
 
-      // Skip homogeneous volumes (all solid or all air)
-      if is_homogeneous(&sampled.volume) {
+      // Skip volumes with no surface crossings (all solid or all air)
+      if !has_surface_crossing(&sampled.volume) {
         return None;
       }
 

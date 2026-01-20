@@ -10,6 +10,7 @@
 
 mod scenes;
 mod shared;
+pub mod triplanar_material;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
