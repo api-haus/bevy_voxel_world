@@ -8,13 +8,14 @@
 //! - Normal array (4 layers): RGB=Normal, A=unused
 //! - Mask array (4 layers): R=Roughness, G=Metallic, B=AO
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{embedded_asset, RenderAssetUsages};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 
-/// Path to the triplanar extension shader.
-const TRIPLANAR_SHADER_PATH: &str = "shaders/triplanar_ext.wgsl";
+/// Path to the embedded triplanar extension shader.
+/// Uses embedded_asset! to avoid WASM .meta file issues.
+const TRIPLANAR_SHADER_PATH: &str = "embedded://voxel_game/shaders/triplanar_ext.wgsl";
 
 /// Number of texture layers in each array.
 pub const NUM_LAYERS: u32 = 4;
@@ -83,6 +84,8 @@ pub struct TriplanarMaterialPlugin;
 
 impl Plugin for TriplanarMaterialPlugin {
     fn build(&self, app: &mut App) {
+        // Embed the shader to avoid WASM .meta file issues
+        embedded_asset!(app, "shaders/triplanar_ext.wgsl");
         app.add_plugins(MaterialPlugin::<TriplanarMaterial>::default());
     }
 }
