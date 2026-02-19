@@ -12,7 +12,7 @@ mod packer;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use ktx2_rw::{BasisCompressionParams, Ktx2Texture, VkFormat};
+use ktx2_rw::{BasisCompressionParams, Ktx2Texture, TranscodeFormat, VkFormat};
 use std::path::{Path, PathBuf};
 
 use config::Config;
@@ -148,7 +148,9 @@ fn build_ktx2_array(
 			.with_context(|| format!("Failed to set image data for layer {}", layer_idx))?;
 	}
 
-	// Compress with Basis Universal (ETC1S mode - best size reduction)
+	// Compress with Basis Universal (ETC1S), then transcode to ETC2 GPU format.
+	// ETC2 is natively supported by WebGL2 and all modern desktop GPUs,
+	// so no runtime transcoder (basis-universal) is needed.
 	let params = BasisCompressionParams::builder()
 		.quality_level(128)
 		.thread_count(thread_count)
@@ -157,6 +159,9 @@ fn build_ktx2_array(
 	texture
 		.compress_basis(&params)
 		.context("Basis Universal compression failed")?;
+	texture
+		.transcode_basis(TranscodeFormat::Etc2Rgba)
+		.context("ETC2 transcoding failed")?;
 
 	// Write to file
 	texture
