@@ -5,8 +5,8 @@
 //! Controls:
 //! - Right-click + drag: Look around
 //! - WASD: Move camera
-//! - Space/Shift: Move up/down
-//! - Ctrl: Sprint
+//! - Q/E: Move up/down
+//! - Shift: Sprint
 
 mod fly_camera;
 mod scenes;

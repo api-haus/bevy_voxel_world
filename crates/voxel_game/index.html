@@ -43,5 +43,36 @@
   <link data-trunk data-wasm-opt="0" data-cargo-no-default-features="" rel="rust"/>
 </head>
 <body>
+<script>
+  // Prevent browser shortcuts that interfere with gameplay.
+  window.addEventListener("keydown", function (e) {
+    // Always allow dev-tools shortcuts
+    if (e.key === "F12") return;
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey &&
+        (e.code === "KeyI" || e.code === "KeyJ" || e.code === "KeyC")) return;
+
+    // Block Ctrl/Meta combos that browsers act on (Ctrl+S save, Ctrl+D bookmark, etc.)
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      return;
+    }
+
+    // Block standalone keys that interfere with gameplay
+    if (["Tab", "F1", "F3", "F5", "F7"].includes(e.key)) {
+      e.preventDefault();
+    }
+  }, { capture: true });
+
+  // Safety net: show "Leave page?" dialog on accidental tab close.
+  window.addEventListener("beforeunload", function (e) {
+    e.preventDefault();
+    e.returnValue = "";
+  });
+
+  // Prevent right-click context menu (right-mouse is used for camera look)
+  window.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+  });
+</script>
 </body>
 </html>
