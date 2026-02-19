@@ -115,6 +115,12 @@ pub fn voxel_metrics_ui(ui: &mut Ui, metrics: &WorldMetrics) {
                 .color(Color32::LIGHT_BLUE)
                 .strong(),
         );
+        ui.separator();
+        ui.label("Ops:");
+        ui.label(
+            RichText::new(format!("+{} -{}", metrics.last_subdivisions, metrics.last_collapses))
+                .color(Color32::LIGHT_YELLOW),
+        );
     });
 
     ui.separator();
@@ -218,11 +224,13 @@ pub fn voxel_metrics_ui(ui: &mut Ui, metrics: &WorldMetrics) {
     // Session stats
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label("Session chunks:");
-        ui.label(
-            RichText::new(format!("{}", metrics.total_chunks_generated))
-                .color(Color32::LIGHT_GRAY),
-        );
+        ui.label("Session:");
+        ui.label(format!(
+            "{} chunks | +{} subdivs | -{} collapses",
+            metrics.total_chunks_generated,
+            metrics.total_subdivisions,
+            metrics.total_collapses
+        ));
     });
 }
 

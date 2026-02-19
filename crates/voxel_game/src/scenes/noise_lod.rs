@@ -11,7 +11,6 @@
 //! - Ctrl: Sprint
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy::camera::Exposure;
@@ -24,29 +23,24 @@ use bevy::pbr::{Atmosphere, AtmosphereSettings, ScatteringMedium};
 use bevy::post_process::bloom::Bloom;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use rand::{Rng, SeedableRng};
-use rayon::prelude::*;
 use smallvec::SmallVec;
 use voxel_bevy::components::{VoxelChunk, VoxelViewer};
 use voxel_bevy::entity_queue::{EntityQueue, EntityQueueConfig};
-use voxel_bevy::fly_camera::{update_fly_camera, FlyCamera};
-use voxel_bevy::input::{fly_camera_input_bundle, CameraInputContext};
+use crate::fly_camera::{fly_camera_input_bundle, update_fly_camera, CameraInputContext, FlyCamera};
 use voxel_bevy::resources::{ChunkEntityMap, VoxelMetricsResource};
 use voxel_bevy::systems::entities::{spawn_chunk_entity, spawn_custom_material_chunk_entity};
-use voxel_bevy::systems::meshing::compute_neighbor_mask;
 use voxel_bevy::world::{sync_world_transforms, VoxelWorldRoot, WorldChunkMap};
 use crate::triplanar_material::{load_baked_terrain_material, LodMaterials, TerrainMaterial, TriplanarMaterial, TriplanarMaterialPlugin};
 #[cfg(feature = "metrics")]
 use voxel_bevy::debug_ui::voxel_metrics_ui;
-use voxel_plugin::noise::{has_surface_crossing, FastNoise2Terrain};
+use voxel_plugin::noise::FastNoise2Terrain;
 use voxel_plugin::octree::{
 	DAabb3, OctreeConfig, OctreeNode, RefinementBudget, TransitionGroup, TransitionType,
 };
-use voxel_plugin::pipeline::{
-	sample_volume_for_node, AsyncPipeline, AsyncRefinementPipeline, PipelineEvent,
-	RefinementRequest,
-};
-use voxel_plugin::surface_nets;
-use voxel_plugin::types::MeshConfig;
+use voxel_plugin::pipeline::{AsyncPipeline, PipelineEvent};
+use voxel_plugin::process_transitions;
+// WASM compat: std::time::Instant panics on wasm32
+use web_time::Instant;
 
 use super::{Scene, SceneEntity};
 
@@ -79,8 +73,7 @@ impl Plugin for NoiseLodPlugin {
           rebuild_world.run_if(in_state(Scene::NoiseLod)),
           initial_mesh_gen.run_if(in_state(Scene::NoiseLod)),
           poll_initial_mesh_gen.run_if(in_state(Scene::NoiseLod)),
-          start_refinement.run_if(in_state(Scene::NoiseLod)),
-          poll_refinement_results.run_if(in_state(Scene::NoiseLod)),
+          run_refinement.run_if(in_state(Scene::NoiseLod)),
           process_entity_queue.run_if(in_state(Scene::NoiseLod)),
           continuous_refinement.run_if(in_state(Scene::NoiseLod)),
         ),
@@ -193,14 +186,12 @@ impl Default for UiSettings {
 	}
 }
 
-/// Async refinement state resource.
-/// Tracks in-flight refinement operations and entity processing queues.
+/// Refinement state resource.
+/// Tracks entity processing queues and continuous refinement state.
 #[derive(Resource)]
 struct AsyncRefinementState {
 	/// Old pipeline (for initial mesh gen only).
 	initial_pipeline: AsyncPipeline,
-	/// New async refinement pipeline (refine + mesh on background thread).
-	refinement_pipeline: AsyncRefinementPipeline,
 	/// Time-budgeted entity operation queue.
 	entity_queue: EntityQueue,
 	/// Whether continuous refinement is enabled.
@@ -213,7 +204,6 @@ impl Default for AsyncRefinementState {
 	fn default() -> Self {
 		Self {
 			initial_pipeline: AsyncPipeline::new(),
-			refinement_pipeline: AsyncRefinementPipeline::new(),
 			entity_queue: EntityQueue::new(EntityQueueConfig {
 				max_groups_per_frame: 8, // Apply up to 8 transition groups per frame
 				max_ms_per_frame: 4.0,   // 4ms budget
@@ -861,16 +851,13 @@ fn ui_controls(
 
 			ui.separator();
 
-			// Async refinement status
-			let is_refining = async_state.refinement_pipeline.is_busy();
+			// Refinement status
 			let pending_groups = async_state.entity_queue.pending_count();
 			let has_pending = pending_groups > 0;
 
 			ui.horizontal(|ui| {
 				ui.label("Status:");
-				if is_refining {
-					ui.colored_label(egui::Color32::YELLOW, "Refining...");
-				} else if has_pending {
+				if has_pending {
 					ui.colored_label(
 						egui::Color32::LIGHT_BLUE,
 						format!("Applying ({} groups)", pending_groups),
@@ -883,7 +870,7 @@ fn ui_controls(
 			ui.horizontal(|ui| {
 				ui.checkbox(&mut async_state.continuous, "Continuous");
 				if ui
-					.add_enabled(!is_refining && !has_pending, egui::Button::new("Refine LOD"))
+					.add_enabled(!has_pending, egui::Button::new("Refine LOD"))
 					.clicked()
 				{
 					refine_events.write(RefineWorldEvent);
@@ -1075,12 +1062,6 @@ fn rebuild_world(
 	// Clear world chunks from WorldChunkMap
 	world_chunk_map.remove_world(world_id);
 
-	// Create new terrain sampler with the selected noise source
-	// We need two copies: one for world_root (owned) and one for parallel sampling (Arc)
-	let sampler: Arc<dyn voxel_plugin::pipeline::VolumeSampler> = match event.sampler_source {
-		SamplerSource::FastNoise2 => Arc::new(FastNoise2Terrain::new(event.seed)),
-	};
-
 	// Update the world's sampler with the new noise source
 	world_root.world.sampler = create_sampler(event.sampler_source, event.seed);
 
@@ -1108,80 +1089,69 @@ fn rebuild_world(
 	world_root.world.leaves = initial_leaves.into();
 
 	let leaf_nodes: Vec<_> = world_root.world.leaves.iter().copied().collect();
-  let use_lod_colors = settings.current.lod_colors_enabled;
-  let use_triplanar = settings.current.use_triplanar && terrain_material.is_some();
+	let use_lod_colors = settings.current.lod_colors_enabled;
+	let use_triplanar = settings.current.use_triplanar && terrain_material.is_some();
 
-  // Parallel: sample noise and generate meshes
-  let chunk_meshes: Vec<_> = leaf_nodes
-    .par_iter()
-    .filter_map(|node| {
-      // Use centralized sampling helper (handles apron offset)
-      let sampled = sample_volume_for_node(node, sampler.as_ref(), &config);
+	// Create a fake TransitionGroup to mesh all initial leaves via centralized pipeline
+	let initial_transition = TransitionGroup {
+		transition_type: TransitionType::Subdivide,
+		group_key: OctreeNode::new(0, 0, 0, config.max_lod), // dummy key
+		nodes_to_add: leaf_nodes.iter().copied().collect(),
+		nodes_to_remove: SmallVec::new(),
+	};
 
-      if !has_surface_crossing(&sampled.volume) {
-        return None; // Skip - no surface crossings
-      }
+	// Use centralized process_transitions for parallel mesh generation
+	let ready_chunks = process_transitions(
+		world_id,
+		&[initial_transition],
+		&world_root.world.sampler,
+		world_root.world.leaves.as_set(),
+		&config,
+	);
 
-      let neighbor_mask = compute_neighbor_mask(node, &world_root.world.leaves, &config);
-      let voxel_size = config.get_voxel_size(node.lod);
+	let mesh_count = ready_chunks.len();
+	let empty_count = leaf_nodes.len() - mesh_count;
 
-      let mesh_config = MeshConfig::default()
-        .with_voxel_size(voxel_size as f32)
-        .with_neighbor_mask(neighbor_mask);
+	let mut local_chunk_map = ChunkEntityMap::default();
+	let chunk_map_ref = if let Some(ref mut map) = chunk_map {
+		&mut **map
+	} else {
+		&mut local_chunk_map
+	};
 
-      let output = surface_nets::generate(&sampled.volume, &sampled.materials, &mesh_config);
+	// Sequential: spawn entities from ready chunks
+	for chunk in ready_chunks {
+		if use_triplanar {
+			spawn_triplanar_chunk_entity_with_marker(
+				&mut commands,
+				&mut meshes,
+				terrain_material.as_ref().unwrap().handle.clone(),
+				chunk_map_ref,
+				&mut world_chunk_map,
+				world_id,
+				chunk.node,
+				&chunk.output,
+				&config,
+			);
+		} else {
+			spawn_chunk_entity_with_marker(
+				&mut commands,
+				&mut meshes,
+				lod_materials.get(chunk.node.lod, use_lod_colors),
+				chunk_map_ref,
+				&mut world_chunk_map,
+				world_id,
+				chunk.node,
+				&chunk.output,
+				&config,
+			);
+		}
+	}
 
-      if output.is_empty() {
-        return None;
-      }
-
-      Some((*node, output))
-    })
-    .collect();
-
-  let mesh_count = chunk_meshes.len();
-  let empty_count = leaf_nodes.len() - mesh_count;
-
-  let mut local_chunk_map = ChunkEntityMap::default();
-  let chunk_map_ref = if let Some(ref mut map) = chunk_map {
-    &mut **map
-  } else {
-    &mut local_chunk_map
-  };
-
-  // Sequential: spawn entities
-  for (node, output) in chunk_meshes {
-    if use_triplanar {
-      spawn_triplanar_chunk_entity_with_marker(
-        &mut commands,
-        &mut meshes,
-        terrain_material.as_ref().unwrap().handle.clone(),
-        chunk_map_ref,
-        &mut world_chunk_map,
-        world_id,
-        node,
-        &output,
-        &config,
-      );
-    } else {
-      spawn_chunk_entity_with_marker(
-        &mut commands,
-        &mut meshes,
-        lod_materials.get(node.lod, use_lod_colors),
-        chunk_map_ref,
-        &mut world_chunk_map,
-        world_id,
-        node,
-        &output,
-        &config,
-      );
-    }
-  }
-
-  info!(
-    "[NoiseLod] Rebuilt world: {} meshes, {} empty chunks (triplanar: {})",
-    mesh_count, empty_count, use_triplanar
-  );
+	info!(
+		"[NoiseLod] Rebuilt world: {} meshes, {} empty chunks (triplanar: {})",
+		mesh_count, empty_count, use_triplanar
+	);
 }
 
 // =============================================================================
@@ -1192,27 +1162,24 @@ fn rebuild_world(
 /// Lower = more responsive but more CPU overhead.
 const CONTINUOUS_REFINEMENT_INTERVAL: u32 = 5;
 
-/// System to start refinement when triggered by message.
+/// System to run refinement when triggered by message.
 ///
-/// This kicks off async refinement + mesh generation on background threads.
-/// The poll_refinement_results system handles completion and queues entity ops.
-fn start_refinement(
+/// Uses sync VoxelWorld::refine() API followed by centralized process_transitions():
+/// - Computes LOD transitions based on viewer position
+/// - Updates world leaves
+/// - Generates meshes in parallel via voxel_plugin's pipeline
+fn run_refinement(
 	mut refine_events: MessageReader<RefineWorldEvent>,
 	mut async_state: ResMut<AsyncRefinementState>,
 	viewers: Query<&GlobalTransform, With<VoxelViewer>>,
-	world_roots: Query<&VoxelWorldRoot>,
-	settings: Res<UiSettings>,
+	mut world_roots: Query<&mut VoxelWorldRoot>,
+	mut metrics: ResMut<VoxelMetricsResource>,
 ) {
 	if refine_events.read().next().is_none() {
 		return;
 	}
 
-	// Don't start new refinement if one is in progress
-	if async_state.refinement_pipeline.is_busy() {
-		return;
-	}
-
-	let Ok(world_root) = world_roots.single() else {
+	let Ok(mut world_root) = world_roots.single_mut() else {
 		warn!("VoxelWorldRoot not found");
 		return;
 	};
@@ -1227,83 +1194,90 @@ fn start_refinement(
 		})
 		.unwrap_or(DVec3::new(0.0, 50.0, 0.0));
 
-	let world_id = world_root.id();
-	let config = world_root.config().clone();
-	let leaves = world_root.world.leaves.as_set().clone();
-
-	// Aggressive collapse budget for responsive zoom-out
-	let budget = RefinementBudget {
+	// Set aggressive collapse budget for responsive zoom-out
+	world_root.world.budget = RefinementBudget {
 		max_subdivisions: 32,
 		max_collapses: 128, // 4x more collapses - they're cheap (8 meshes -> 1)
 		..RefinementBudget::DEFAULT
 	};
 
-	// Start async refinement + mesh generation (non-blocking)
-	// Both refine() and process_transitions() run on background thread
-	let started = match settings.current.sampler_source {
-		SamplerSource::FastNoise2 => {
-			let sampler = FastNoise2Terrain::new(settings.current.current_seed);
-			async_state.refinement_pipeline.start(RefinementRequest {
-				world_id,
-				viewer_pos,
-				leaves,
-				config,
-				budget,
-				sampler,
-			})
-		}
-	};
+	// Run sync refinement - computes transitions and updates leaves
+	let refine_start = Instant::now();
+	let output = world_root.world.refine(viewer_pos);
+	let refine_us = refine_start.elapsed().as_micros() as u64;
 
-	if !started {
-		warn!("[Refine] Failed to start refinement pipeline");
-	}
-}
-
-/// System to poll for async refinement completion.
-///
-/// When refinement completes:
-/// 1. Apply transitions to world.leaves (fast HashSet ops)
-/// 2. Queue transition groups for atomic entity application
-/// 3. Record metrics (if enabled)
-fn poll_refinement_results(
-	mut async_state: ResMut<AsyncRefinementState>,
-	mut world_roots: Query<&mut VoxelWorldRoot>,
-	mut metrics: ResMut<VoxelMetricsResource>,
-) {
-	// Poll for results (non-blocking)
-	let Some(result) = async_state.refinement_pipeline.poll_results() else {
+	if output.transition_groups.is_empty() {
 		return;
-	};
-
-	let Ok(mut world_root) = world_roots.single_mut() else {
-		warn!("VoxelWorldRoot not found");
-		return;
-	};
-
-	// Apply transitions to world.leaves (fast HashSet operations)
-	for transition in &result.transitions {
-		for node in &transition.nodes_to_remove {
-			world_root.world.leaves.remove(node);
-		}
-		for node in &transition.nodes_to_add {
-			world_root.world.leaves.insert(*node);
-		}
 	}
 
-	// Record refinement stats
-	metrics.record_refinement_stats(result.stats.refine_us, result.stats.mesh_us);
+	let world_id = world_root.id();
 
-	// Queue transition groups for atomic entity application
-	// Each group will be applied atomically (despawn + spawn in same frame)
-	let num_transitions = result.transitions.len();
-	async_state.entity_queue.queue_transitions(result.transitions);
+	// Use centralized process_transitions for parallel mesh generation
+	// This handles: presample, surface crossing check, neighbor mask, meshing
+	let mesh_start = Instant::now();
+	let ready_chunks = voxel_plugin::process_transitions(
+		world_id,
+		&output.transition_groups,
+		&world_root.world.sampler,
+		world_root.world.leaves.as_set(),
+		world_root.config(),
+	);
+	let mesh_us = mesh_start.elapsed().as_micros() as u64;
 
-	if num_transitions > 0 {
-		info!(
-			"[Refine] Queued {} transition groups (refine: {}us, mesh: {}us)",
-			num_transitions, result.stats.refine_us, result.stats.mesh_us
-		);
-	}
+	// Build a hashmap for O(1) lookup when grouping
+	let ready_by_node: HashMap<OctreeNode, voxel_plugin::pipeline::ReadyChunk> = ready_chunks
+		.into_iter()
+		.map(|c| (c.node, c))
+		.collect();
+
+	// Build transitions for entity queue (preserves atomic grouping)
+	let transitions: Vec<_> = output
+		.transition_groups
+		.into_iter()
+		.map(|group| {
+			let ready_for_group: Vec<_> = group
+				.nodes_to_add
+				.iter()
+				.filter_map(|node| ready_by_node.get(node))
+				.map(|c| voxel_plugin::pipeline::ReadyChunk {
+					world_id: c.world_id,
+					node: c.node,
+					output: c.output.clone(),
+					hint: c.hint.clone(),
+					timing_us: c.timing_us,
+				})
+				.collect();
+
+			voxel_plugin::pipeline::CompletedTransition {
+				group_key: group.group_key,
+				is_collapse: matches!(group.transition_type, TransitionType::Merge),
+				nodes_to_remove: group.nodes_to_remove.to_vec(),
+				nodes_to_add: group.nodes_to_add.to_vec(),
+				ready_chunks: ready_for_group,
+			}
+		})
+		.collect();
+
+	let num_despawns: usize = transitions.iter().map(|t| t.nodes_to_remove.len()).sum();
+	let num_spawns: usize = transitions.iter().map(|t| t.ready_chunks.len()).sum();
+
+	async_state.entity_queue.queue_transitions(transitions);
+
+	info!(
+		"[Refine] Queued {} groups: {} despawns, {} spawns (subdivs: {}, collapses: {})",
+		output.stats.subdivisions_performed + output.stats.collapses_performed,
+		num_despawns,
+		num_spawns,
+		output.stats.subdivisions_performed,
+		output.stats.collapses_performed,
+	);
+
+	metrics.record_refinement_ops(
+		output.stats.subdivisions_performed as u32,
+		output.stats.collapses_performed as u32,
+	);
+	metrics.record_refine_timing(refine_us);
+	metrics.record_mesh_timing(mesh_us);
 }
 
 /// System to process queued transition groups atomically.
@@ -1430,12 +1404,7 @@ fn continuous_refinement(
 		return;
 	}
 
-	// Don't trigger if refinement is already in progress
-	if async_state.refinement_pipeline.is_busy() {
-		return;
-	}
-
-	// Allow refinement to start even if entity queue has pending work
+	// Allow refinement even if entity queue has pending work
 	// This enables pipelining: process entities while computing next refinement
 	// Only block if queue is severely backed up (>32 groups)
 	if async_state.entity_queue.pending_count() > 32 {

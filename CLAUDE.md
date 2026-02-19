@@ -11,12 +11,6 @@
   - These get copied to dist by trunk via `index.html`
   - Create `.meta` files for each asset to avoid WASM deserialization errors
 
-## WASM Limitations
-
-- **WebGL2** (default): No storage buffers in fragment shaders, no compute shaders
-- **WebGPU** (opt-in via `--features webgpu`): Full feature support but limited browser compatibility
-- Atmosphere/volumetric effects require WebGPU or are disabled on WebGL2
-
 ## Build Commands
 
 ```bash
@@ -48,7 +42,7 @@ Engine-agnostic voxel meshing library.
 **Responsibilities:**
 - Surface Nets meshing (SDF → triangle mesh)
 - Implicit octree LOD with viewer-distance refinement
-- 5-stage async pipeline (refinement → presample → mesh → compose → present)
+- 5-stage pipeline (refinement → presample → mesh → compose → present)
 - Platform-agnostic noise sampling
 
 **Do:**
@@ -84,7 +78,6 @@ Reusable Bevy bridge for voxel worlds.
 **Responsibilities:**
 - LOD chunk entity management
 - Material type definitions and bind group layouts
-- Fly camera controls
 - Debug UI overlay
 - EntityQueue for rate-limited spawning
 
@@ -102,6 +95,8 @@ Reusable Bevy bridge for voxel worlds.
 
 #### voxel_unity
 Unity FFI bridge (cdylib).
+
+**C# Counterpart:** `../Packages/im.pala.voxelmission/Native` contains the Unity C# bindings that consume this FFI bridge.
 
 **Responsibilities:**
 - C ABI for Unity interop
@@ -149,3 +144,6 @@ CLI tool for terrain texture packing.
 
 **Don't:**
 - Modify at runtime (build-time only tool)
+
+
+Note that in ../Packages/im.pala.voxelmission/Native - there's the unity c# module for the unity voxel plugin.

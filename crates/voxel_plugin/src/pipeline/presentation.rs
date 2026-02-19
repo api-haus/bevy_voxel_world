@@ -42,6 +42,7 @@ pub fn present_grouped(world_id: WorldId, grouped: Vec<GroupedMesh>) -> Vec<Read
         node: node_mesh.node,
         output: node_mesh.output,
         hint: hint.clone(),
+        timing_us: node_mesh.timing_us,
       });
     }
   }
@@ -60,6 +61,7 @@ pub fn present_ungrouped(world_id: WorldId, ungrouped: Vec<MeshResult>) -> Vec<R
       node: result.node,
       output: result.output,
       hint: PresentationHint::Immediate,
+      timing_us: result.timing_us,
     })
     .collect()
 }

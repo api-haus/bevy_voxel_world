@@ -5,6 +5,8 @@
 //! - Proper LOD min/max controls (0..31)
 //! - Rust pushes pre-calculated world positions and scales
 //! - FastNoise2-rs integration as the terrain sampler
+//! - Synchronous refinement with parallel mesh generation via rayon
+//! - Engine-agnostic metrics collection via `metrics` feature
 //!
 //! # Architecture
 //!
@@ -15,18 +17,22 @@
 //! │                   │                │  - config: OctreeConfig │
 //! │ Update():         │  voxel_world_  │  - leaves: HashSet<Node>│
 //! │   viewerPos ──────┼──update()────► │  - sampler: FastNoise2  │
-//! │                   │                │  - pipeline: AsyncRef   │
-//! │                   │ ◄──────────────│  - pending_batches      │
-//! │ ApplyBatch():     │  Presentation  │                         │
-//! │   Create/Remove   │  Batch         │ update():               │
-//! │   GameObjects     │                │  1. Update viewer pos   │
-//! └───────────────────┘                │  2. Poll pipeline       │
-//!                                      │  3. Start refinement    │
-//!                                      │  4. Return events       │
-//!                                      └─────────────────────────┘
+//! │                   │                │                         │
+//! │                   │ ◄──────────────│ update():               │
+//! │ ApplyBatch():     │  Presentation  │  1. Run sync refine()   │
+//! │   Create/Remove   │  Batch         │  2. Parallel mesh gen   │
+//! │   GameObjects     │                │  3. Return batch        │
+//! └───────────────────┘                └─────────────────────────┘
 //! ```
+//!
+//! # Metrics
+//!
+//! Call `voxel_world_get_metrics()` to retrieve timing statistics:
+//! - Refinement timing (avg, min, max, last from 128-sample window)
+//! - Mesh generation timing (same)
+//! - Cumulative operation counts (refine calls, chunks meshed, transitions)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -36,10 +42,11 @@ use glam::DVec3;
 
 use voxel_plugin::{
     noise::FastNoise2Terrain,
-    octree::{DAabb3, OctreeConfig, OctreeNode, RefinementBudget},
-    pipeline::{AsyncRefinementPipeline, RefinementRequest, VolumeSampler},
+    octree::{DAabb3, OctreeConfig, OctreeNode, TransitionType},
+    pipeline::VolumeSampler,
+    process_transitions,
     types::Vertex,
-    world::WorldId,
+    world::VoxelWorld,
     MetaballsSampler, NormalMode,
 };
 
@@ -183,6 +190,65 @@ pub struct FfiLegacyWorldConfig {
 }
 
 // =============================================================================
+// FFI Metrics Types
+// =============================================================================
+
+/// Timing histogram stats (from RollingWindow).
+///
+/// Each timing category provides these computed statistics from a 128-sample
+/// rolling window.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FfiTimingStats {
+    /// Most recent sample in microseconds.
+    pub last_us: u64,
+    /// Mean of window in microseconds.
+    pub avg_us: u64,
+    /// Minimum in window in microseconds.
+    pub min_us: u64,
+    /// Maximum in window in microseconds.
+    pub max_us: u64,
+    /// Number of samples in window (up to 128).
+    pub sample_count: u32,
+    /// Padding for alignment.
+    pub _pad: u32,
+}
+
+/// Rust-side metrics snapshot for FFI export.
+///
+/// Contains timing histograms and cumulative operation counts.
+/// Access via `voxel_world_get_metrics()`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FfiMetricsSnapshot {
+    // Timing histograms
+    /// Refinement timing stats.
+    pub refine: FfiTimingStats,
+    /// Mesh generation timing stats.
+    pub mesh: FfiTimingStats,
+    /// Volume sampling timing stats.
+    pub sample: FfiTimingStats,
+
+    // Operation counts (cumulative)
+    /// Total number of refine() calls.
+    pub total_refine_calls: u64,
+    /// Total chunks meshed through pipeline.
+    pub total_chunks_meshed: u64,
+    /// Total transition groups processed.
+    pub total_transitions: u64,
+
+    // Refinement operation counters
+    /// Subdivisions performed last frame.
+    pub last_subdivisions: u32,
+    /// Collapses performed last frame.
+    pub last_collapses: u32,
+    /// Total subdivisions this session.
+    pub total_subdivisions: u64,
+    /// Total collapses this session.
+    pub total_collapses: u64,
+}
+
+// =============================================================================
 // Sampler Variants - Phase 2
 // =============================================================================
 
@@ -244,19 +310,12 @@ struct RetainedTransitionGroup {
 }
 
 /// Internal state for a voxel world with Rust-driven orchestration.
+///
+/// Uses VoxelWorld<SamplerVariant> internally - all octree state, configuration,
+/// and sampler are owned by the core voxel_plugin world.
 struct WorldState {
-    /// World identifier
-    world_id: WorldId,
-    /// Octree configuration (voxel size, LOD range, etc.)
-    config: OctreeConfig,
-    /// Volume sampler (FastNoise2 or metaballs)
-    sampler: SamplerVariant,
-    /// Current viewer position
-    viewer_pos: DVec3,
-    /// Current octree leaves
-    leaves: HashSet<OctreeNode>,
-    /// Async refinement + mesh pipeline
-    pipeline: AsyncRefinementPipeline,
+    /// Core voxel world (owns config, leaves, sampler, budget)
+    world: VoxelWorld<SamplerVariant>,
     /// Pending transition groups (retained for pointer validity)
     pending_groups: Vec<RetainedTransitionGroup>,
     /// FFI transition groups (built from pending_groups, points into their data)
@@ -266,9 +325,6 @@ struct WorldState {
     /// Legacy: last generated mesh (for voxel_chunk_generate compatibility)
     last_mesh: Option<voxel_plugin::MeshOutput>,
 }
-
-/// Number of voxels per cell (interior cells, excluding boundary overlap).
-const CHUNK_VOXELS: i64 = 28;
 
 impl WorldState {
     /// Create a new world with FastNoise2 terrain.
@@ -283,7 +339,6 @@ impl WorldState {
         };
 
         // Create world bounds from half-extent (centered at origin)
-        // Node coordinates span negative to positive, so world_origin is ZERO
         let world_bounds = DAabb3::from_center_half_extents(
             DVec3::ZERO,
             DVec3::splat(world_half_extent),
@@ -299,12 +354,7 @@ impl WorldState {
         };
 
         Self {
-            world_id: WorldId::new(),
-            config,
-            sampler,
-            viewer_pos: DVec3::ZERO,
-            leaves: HashSet::new(),
-            pipeline: AsyncRefinementPipeline::new(),
+            world: VoxelWorld::new(config, sampler),
             pending_groups: Vec::new(),
             ffi_groups: Vec::new(),
             needs_initial_population: true,
@@ -328,12 +378,7 @@ impl WorldState {
         };
 
         Self {
-            world_id: WorldId::new(),
-            config,
-            sampler,
-            viewer_pos: DVec3::ZERO,
-            leaves: HashSet::new(),
-            pipeline: AsyncRefinementPipeline::new(),
+            world: VoxelWorld::new(config, sampler),
             pending_groups: Vec::new(),
             ffi_groups: Vec::new(),
             needs_initial_population: false, // Legacy mode uses manual chunk requests
@@ -341,34 +386,28 @@ impl WorldState {
         }
     }
 
-    /// Calculate world position for a node (uses config for consistency with LOD calculations).
+    /// Calculate world position for a node.
     fn node_world_pos(&self, node: &OctreeNode) -> DVec3 {
-        self.config.get_node_min(node)
+        self.world.config.get_node_min(node)
     }
 
     /// Calculate mesh scale for a node (voxel_size * 2^lod).
     fn node_scale(&self, node: &OctreeNode) -> f64 {
-        self.config.get_voxel_size(node.lod)
+        self.world.config.get_voxel_size(node.lod)
     }
 
     /// Create initial leaves based on world bounds and suggested LOD.
     fn populate_initial_leaves(&mut self) {
-        // Use config's suggested initial LOD based on world bounds
-        let initial_lod = self.config.suggest_initial_lod();
-
-        // Compute initial leaves from world bounds
-        self.leaves = self.config.compute_initial_leaves(initial_lod)
-            .into_iter()
-            .collect();
-
+        let initial_lod = self.world.config.suggest_initial_lod();
+        let initial_leaves = self.world.config.compute_initial_leaves(initial_lod);
+        self.world.leaves = initial_leaves.into_iter().collect::<std::collections::HashSet<_>>().into();
         self.needs_initial_population = false;
     }
 
     /// Update world state with new viewer position.
+    /// Uses synchronous refinement with parallel mesh generation via voxel_plugin core.
     /// Returns true if events are ready.
     fn update(&mut self, viewer_pos: DVec3) -> bool {
-        self.viewer_pos = viewer_pos;
-
         // Clear previous pending data
         self.pending_groups.clear();
         self.ffi_groups.clear();
@@ -378,110 +417,127 @@ impl WorldState {
             self.populate_initial_leaves();
         }
 
-        // Poll pipeline for completed results
-        if let Some(result) = self.pipeline.poll_results() {
-            // Process completed transitions into retained groups
-            for transition in result.transitions {
-                // Update leaves set
-                for node in &transition.nodes_to_remove {
-                    self.leaves.remove(node);
-                }
-                for node in &transition.nodes_to_add {
-                    self.leaves.insert(*node);
-                }
+        // Skip if no leaves to refine
+        if self.world.leaves.is_empty() {
+            return false;
+        }
 
-                // Build retained group with owned data
-                let to_remove: Vec<FfiChunkKey> = transition
-                    .nodes_to_remove
-                    .iter()
-                    .map(|n| (*n).into())
-                    .collect();
+        // Run synchronous refinement - computes transitions and updates leaves
+        let output = self.world.refine(viewer_pos);
 
-                let to_add: Vec<RetainedChunk> = transition
-                    .ready_chunks
-                    .into_iter()
-                    .map(|chunk| {
-                        let node = chunk.node;
-                        let world_pos = self.node_world_pos(&node);
-                        let scale = self.node_scale(&node);
-                        RetainedChunk {
-                            key: node.into(),
-                            world_pos,
-                            scale,
-                            vertices: chunk.output.vertices,
-                            indices: chunk.output.indices,
-                        }
-                    })
-                    .collect();
+        // Check if there are any transitions
+        if output.transition_groups.is_empty() {
+            return false;
+        }
 
-                self.pending_groups.push(RetainedTransitionGroup {
-                    group_key: transition.group_key.into(),
-                    is_collapse: transition.is_collapse,
-                    to_remove,
-                    to_add,
-                    presentations: Vec::new(), // Will be built below
-                });
+        // Use centralized process_transitions for parallel mesh generation
+        // This handles: presample, surface crossing check, neighbor mask, meshing
+        // Note: process_transitions has its own tracing instrumentation via voxel_plugin
+        let ready_chunks = process_transitions(
+            self.world.id,
+            &output.transition_groups,
+            &self.world.sampler,
+            self.world.leaves.as_set(),
+            &self.world.config,
+        );
+
+        // Record mesh timing metrics (aggregate from ready_chunks)
+        #[cfg(feature = "metrics")]
+        {
+            let total_mesh_us: u64 = ready_chunks.iter().map(|c| c.timing_us).sum();
+            if total_mesh_us > 0 {
+                self.world.metrics.record_mesh_timing(total_mesh_us);
             }
+            self.world.metrics.record_chunks_meshed(ready_chunks.len());
+        }
 
-            // Build FFI presentations (must be done after all groups are stored for pointer stability)
-            for group in &mut self.pending_groups {
-                group.presentations = group
-                    .to_add
-                    .iter()
-                    .map(|chunk| FfiChunkPresentation {
-                        key: chunk.key,
-                        world_pos_x: chunk.world_pos.x,
-                        world_pos_y: chunk.world_pos.y,
-                        world_pos_z: chunk.world_pos.z,
-                        scale: chunk.scale,
-                        vertices_ptr: chunk.vertices.as_ptr(),
-                        vertices_count: chunk.vertices.len() as u32,
-                        indices_ptr: chunk.indices.as_ptr(),
-                        indices_count: chunk.indices.len() as u32,
-                    })
-                    .collect();
-            }
+        // Build hashmap for O(1) lookup when grouping
+        let ready_by_node: HashMap<OctreeNode, voxel_plugin::pipeline::ReadyChunk> = ready_chunks
+            .into_iter()
+            .map(|c| (c.node, c))
+            .collect();
 
-            // Build FFI groups (points into pending_groups data)
-            self.ffi_groups = self
-                .pending_groups
+        // Build retained groups for each transition group
+        for group in &output.transition_groups {
+            let is_collapse = matches!(group.transition_type, TransitionType::Merge);
+
+            // Get to_remove keys
+            let to_remove: Vec<FfiChunkKey> = group
+                .nodes_to_remove
                 .iter()
-                .map(|group| FfiTransitionGroup {
-                    group_key: group.group_key,
-                    is_collapse: if group.is_collapse { 1 } else { 0 },
-                    _pad: [0; 3],
-                    to_remove: if group.to_remove.is_empty() {
-                        std::ptr::null()
-                    } else {
-                        group.to_remove.as_ptr()
-                    },
-                    to_remove_count: group.to_remove.len() as u32,
-                    to_add: if group.presentations.is_empty() {
-                        std::ptr::null()
-                    } else {
-                        group.presentations.as_ptr()
-                    },
-                    to_add_count: group.presentations.len() as u32,
+                .map(|n| (*n).into())
+                .collect();
+
+            // Get ready chunks for this group
+            let to_add: Vec<RetainedChunk> = group
+                .nodes_to_add
+                .iter()
+                .filter_map(|node| ready_by_node.get(node))
+                .map(|chunk| {
+                    let world_pos = self.node_world_pos(&chunk.node);
+                    let scale = self.node_scale(&chunk.node);
+                    RetainedChunk {
+                        key: chunk.node.into(),
+                        world_pos,
+                        scale,
+                        vertices: chunk.output.vertices.clone(),
+                        indices: chunk.output.indices.clone(),
+                    }
                 })
                 .collect();
 
-            return !self.ffi_groups.is_empty();
+            self.pending_groups.push(RetainedTransitionGroup {
+                group_key: group.group_key.into(),
+                is_collapse,
+                to_remove,
+                to_add,
+                presentations: Vec::new(), // Will be built below
+            });
         }
 
-        // If pipeline is idle and we have leaves, start new refinement
-        if !self.pipeline.is_busy() && !self.leaves.is_empty() {
-            let request = RefinementRequest {
-                world_id: self.world_id,
-                viewer_pos: self.viewer_pos,
-                leaves: self.leaves.clone(),
-                config: self.config.clone(),
-                budget: RefinementBudget::DEFAULT,
-                sampler: self.sampler.clone(),
-            };
-            self.pipeline.start(request);
+        // Build FFI presentations (must be done after all groups are stored for pointer stability)
+        for group in &mut self.pending_groups {
+            group.presentations = group
+                .to_add
+                .iter()
+                .map(|chunk| FfiChunkPresentation {
+                    key: chunk.key,
+                    world_pos_x: chunk.world_pos.x,
+                    world_pos_y: chunk.world_pos.y,
+                    world_pos_z: chunk.world_pos.z,
+                    scale: chunk.scale,
+                    vertices_ptr: chunk.vertices.as_ptr(),
+                    vertices_count: chunk.vertices.len() as u32,
+                    indices_ptr: chunk.indices.as_ptr(),
+                    indices_count: chunk.indices.len() as u32,
+                })
+                .collect();
         }
 
-        false
+        // Build FFI groups (points into pending_groups data)
+        self.ffi_groups = self
+            .pending_groups
+            .iter()
+            .map(|group| FfiTransitionGroup {
+                group_key: group.group_key,
+                is_collapse: if group.is_collapse { 1 } else { 0 },
+                _pad: [0; 3],
+                to_remove: if group.to_remove.is_empty() {
+                    std::ptr::null()
+                } else {
+                    group.to_remove.as_ptr()
+                },
+                to_remove_count: group.to_remove.len() as u32,
+                to_add: if group.presentations.is_empty() {
+                    std::ptr::null()
+                } else {
+                    group.presentations.as_ptr()
+                },
+                to_add_count: group.presentations.len() as u32,
+            })
+            .collect();
+
+        !self.ffi_groups.is_empty()
     }
 }
 
@@ -648,6 +704,95 @@ pub extern "C" fn voxel_world_destroy(world_id: i32) -> i32 {
     }
 }
 
+/// Get current metrics snapshot for a world.
+///
+/// Retrieves timing statistics and operation counts from the voxel world.
+/// Stats are computed from a 128-sample rolling window.
+///
+/// # Safety
+/// - `out` must point to a valid FfiMetricsSnapshot struct.
+///
+/// # Parameters
+/// - `world_id`: ID returned by voxel_world_create_v3
+/// - `out`: Output struct to receive metrics snapshot
+///
+/// # Returns
+/// - 0 on success
+/// - -1 if out is null
+/// - -2 if failed to acquire lock
+/// - -3 if world_id not found
+/// - -4 if metrics feature not enabled (compile-time)
+#[no_mangle]
+pub unsafe extern "C" fn voxel_world_get_metrics(
+    world_id: i32,
+    out: *mut FfiMetricsSnapshot,
+) -> i32 {
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = (world_id, out);
+        return -4; // Metrics not enabled
+    }
+
+    #[cfg(feature = "metrics")]
+    {
+        if out.is_null() {
+            return -1;
+        }
+
+        let Ok(guard) = WORLDS.lock() else {
+            return -2;
+        };
+
+        let Some(ref worlds) = *guard else {
+            return -3;
+        };
+
+        let Some(state) = worlds.get(&world_id) else {
+            return -3;
+        };
+
+        // Get snapshot from world metrics
+        let snapshot = state.world.metrics.snapshot();
+
+        // Convert to FFI types
+        (*out) = FfiMetricsSnapshot {
+            refine: FfiTimingStats {
+                last_us: snapshot.refine.last_us,
+                avg_us: snapshot.refine.avg_us,
+                min_us: snapshot.refine.min_us,
+                max_us: snapshot.refine.max_us,
+                sample_count: snapshot.refine.sample_count,
+                _pad: 0,
+            },
+            mesh: FfiTimingStats {
+                last_us: snapshot.mesh.last_us,
+                avg_us: snapshot.mesh.avg_us,
+                min_us: snapshot.mesh.min_us,
+                max_us: snapshot.mesh.max_us,
+                sample_count: snapshot.mesh.sample_count,
+                _pad: 0,
+            },
+            sample: FfiTimingStats {
+                last_us: snapshot.sample.last_us,
+                avg_us: snapshot.sample.avg_us,
+                min_us: snapshot.sample.min_us,
+                max_us: snapshot.sample.max_us,
+                sample_count: snapshot.sample.sample_count,
+                _pad: 0,
+            },
+            total_refine_calls: snapshot.total_refine_calls,
+            total_chunks_meshed: snapshot.total_chunks_meshed,
+            total_transitions: snapshot.total_transitions,
+            last_subdivisions: snapshot.last_subdivisions,
+            last_collapses: snapshot.last_collapses,
+            total_subdivisions: snapshot.total_subdivisions,
+            total_collapses: snapshot.total_collapses,
+        };
+
+        0
+    }
+}
+
 // =============================================================================
 // Legacy FFI Functions (backward compatibility with v0.2)
 // =============================================================================
@@ -716,30 +861,20 @@ pub unsafe extern "C" fn voxel_chunk_generate(
     };
 
     // Synchronous mesh generation for legacy API
-    let lod_scale = 1i64 << lod;
-    let grid_offset = [
-        (grid_x as i64) * CHUNK_VOXELS * lod_scale,
-        (grid_y as i64) * CHUNK_VOXELS * lod_scale,
-        (grid_z as i64) * CHUNK_VOXELS * lod_scale,
-    ];
+    let node = OctreeNode::new(grid_x, grid_y, grid_z, lod);
+    let sampled = voxel_plugin::pipeline::sample_volume_for_node(&node, &state.world.sampler, &state.world.config);
 
-    let effective_voxel_size = state.config.voxel_size * (lod_scale as f64);
-
-    // Sample volume
-    let mut volume = Box::new([0i8; voxel_plugin::SAMPLE_SIZE_CB]);
-    let mut materials = Box::new([0u8; voxel_plugin::SAMPLE_SIZE_CB]);
-
-    state.sampler.sample_volume(grid_offset, effective_voxel_size, &mut *volume, &mut *materials);
+    let voxel_size = state.world.config.get_voxel_size(lod);
 
     // Generate mesh
     let config = voxel_plugin::MeshConfig {
-        voxel_size: effective_voxel_size as f32,
+        voxel_size: voxel_size as f32,
         neighbor_mask: 0,
         normal_mode: NormalMode::InterpolatedGradient,
         use_microsplat_encoding: false,
     };
 
-    let output = voxel_plugin::surface_nets::generate(&*volume, &*materials, &config);
+    let output = voxel_plugin::surface_nets::generate(&sampled.volume, &sampled.materials, &config);
 
     (*out) = FfiMeshResult {
         vertices_ptr: output.vertices.as_ptr(),
@@ -856,19 +991,16 @@ mod tests {
                 _pad: 0,
             };
 
-            // First update - should start pipeline
+            // First update - with sync refine, this should return results immediately
+            // (after initial population and refinement)
             let status = voxel_world_update(world_id, 0.0, 0.0, 0.0, &mut batch);
             assert!(status >= 0, "Update should not fail");
 
-            // Multiple updates - eventually pipeline should complete
-            for _ in 0..100 {
-                let status = voxel_world_update(world_id, 0.0, 0.0, 0.0, &mut batch);
-                if status == 1 {
-                    // Events ready - verify batch structure
-                    assert!(batch.groups_count > 0 || batch.groups.is_null());
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+            // Verify we got a batch (sync refine returns immediately)
+            // Note: May be 0 if no transitions needed, or 1 if we have groups
+            if status == 1 {
+                assert!(batch.groups_count > 0, "If status is 1, should have groups");
+                assert!(!batch.groups.is_null(), "Groups pointer should be valid");
             }
 
             voxel_world_destroy(world_id);

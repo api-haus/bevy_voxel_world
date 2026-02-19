@@ -122,6 +122,62 @@ impl RollingWindow<u64> {
             Some((min, max))
         }
     }
+
+    /// Extract histogram stats for FFI export.
+    pub fn stats(&self) -> TimingStats {
+        let (min, max) = self.min_max().unwrap_or((0, 0));
+        TimingStats {
+            last_us: self.last().copied().unwrap_or(0),
+            avg_us: self.average() as u64,
+            min_us: min,
+            max_us: max,
+            sample_count: self.len() as u32,
+        }
+    }
+}
+
+/// Timing histogram stats (from RollingWindow).
+///
+/// Used for FFI export and debug display.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TimingStats {
+    /// Most recent sample in microseconds.
+    pub last_us: u64,
+    /// Mean of window in microseconds.
+    pub avg_us: u64,
+    /// Minimum in window in microseconds.
+    pub min_us: u64,
+    /// Maximum in window in microseconds.
+    pub max_us: u64,
+    /// Number of samples in window (up to 128).
+    pub sample_count: u32,
+}
+
+/// Snapshot of world metrics for FFI export.
+///
+/// Contains computed stats from rolling windows and cumulative counters.
+#[derive(Clone, Debug, Default)]
+pub struct MetricsSnapshot {
+    /// Refinement timing stats.
+    pub refine: TimingStats,
+    /// Mesh generation timing stats.
+    pub mesh: TimingStats,
+    /// Volume sampling timing stats.
+    pub sample: TimingStats,
+    /// Total number of refine() calls.
+    pub total_refine_calls: u64,
+    /// Total chunks meshed through pipeline.
+    pub total_chunks_meshed: u64,
+    /// Total transition groups processed.
+    pub total_transitions: u64,
+    /// Subdivisions performed last frame.
+    pub last_subdivisions: u32,
+    /// Collapses performed last frame.
+    pub last_collapses: u32,
+    /// Total subdivisions this session.
+    pub total_subdivisions: u64,
+    /// Total collapses this session.
+    pub total_collapses: u64,
 }
 
 impl Default for RollingWindow<u64> {
@@ -168,6 +224,24 @@ pub struct WorldMetrics {
     pub last_mesh_us: u64,
     /// Total chunks generated this session.
     pub total_chunks_generated: u64,
+
+    // Cumulative operation counters (for FFI export)
+    /// Total number of refine() calls.
+    pub total_refine_calls: u64,
+    /// Total chunks meshed through pipeline.
+    pub total_chunks_meshed: u64,
+    /// Total transition groups processed.
+    pub total_transitions: u64,
+
+    // Refinement operation counters
+    /// Subdivisions performed last frame.
+    pub last_subdivisions: u32,
+    /// Collapses performed last frame.
+    pub last_collapses: u32,
+    /// Total subdivisions this session.
+    pub total_subdivisions: u64,
+    /// Total collapses this session.
+    pub total_collapses: u64,
 }
 
 impl Default for WorldMetrics {
@@ -186,6 +260,13 @@ impl Default for WorldMetrics {
             last_refine_us: 0,
             last_mesh_us: 0,
             total_chunks_generated: 0,
+            total_refine_calls: 0,
+            total_chunks_meshed: 0,
+            total_transitions: 0,
+            last_subdivisions: 0,
+            last_collapses: 0,
+            total_subdivisions: 0,
+            total_collapses: 0,
         }
     }
 }
@@ -210,7 +291,25 @@ impl WorldMetrics {
         self.sample_timings.clear();
         self.last_refine_us = 0;
         self.last_mesh_us = 0;
-        // Don't reset total_chunks_generated - it's cumulative
+        self.last_subdivisions = 0;
+        self.last_collapses = 0;
+        // Don't reset cumulative counters
+    }
+
+    /// Create FFI-safe snapshot with computed stats from rolling windows.
+    pub fn snapshot(&self) -> MetricsSnapshot {
+        MetricsSnapshot {
+            refine: self.refine_timings.stats(),
+            mesh: self.mesh_timings.stats(),
+            sample: self.sample_timings.stats(),
+            total_refine_calls: self.total_refine_calls,
+            total_chunks_meshed: self.total_chunks_meshed,
+            total_transitions: self.total_transitions,
+            last_subdivisions: self.last_subdivisions,
+            last_collapses: self.last_collapses,
+            total_subdivisions: self.total_subdivisions,
+            total_collapses: self.total_collapses,
+        }
     }
 
     /// Record a mesh generation timing.
@@ -221,11 +320,36 @@ impl WorldMetrics {
         }
     }
 
-    /// Record a refinement timing.
+    /// Record a refinement timing and increment call count.
     pub fn record_refine_timing(&mut self, timing_us: u64) {
         if is_enabled() {
             self.refine_timings.push(timing_us);
             self.last_refine_us = timing_us;
+            self.total_refine_calls += 1;
+        }
+    }
+
+    /// Record transition groups processed count.
+    pub fn record_transitions(&mut self, count: usize) {
+        if is_enabled() {
+            self.total_transitions += count as u64;
+        }
+    }
+
+    /// Record chunks meshed count.
+    pub fn record_chunks_meshed(&mut self, count: usize) {
+        if is_enabled() {
+            self.total_chunks_meshed += count as u64;
+        }
+    }
+
+    /// Record refinement operations (subdivisions and collapses).
+    pub fn record_refinement_ops(&mut self, subdivisions: u32, collapses: u32) {
+        if is_enabled() {
+            self.last_subdivisions = subdivisions;
+            self.last_collapses = collapses;
+            self.total_subdivisions += subdivisions as u64;
+            self.total_collapses += collapses as u64;
         }
     }
 

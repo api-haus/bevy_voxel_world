@@ -211,6 +211,17 @@ fn enforce_neighbor_gradation(
 					if lod_diff > budget.max_relative_lod {
 						// Can only subdivide if neighbor LOD > MinLOD
 						if neighbor.lod > config.min_lod && leaves.contains(&neighbor) {
+							// Skip nodes that touch the world boundary.
+							// If the neighbor is not FULLY contained within world bounds,
+							// subdividing it may create children outside bounds, which
+							// triggers cascading re-subdivisions.
+							if let Some(bounds) = &config.world_bounds {
+								let neighbor_aabb = config.get_node_aabb(&neighbor);
+								if !bounds.contains_aabb(&neighbor_aabb) {
+									continue; // Don't subdivide nodes touching boundary
+								}
+							}
+
 							apply_subdivide(&neighbor, leaves, groups, Some(config));
 							neighbor_subdivisions += 1;
 							changed = true;

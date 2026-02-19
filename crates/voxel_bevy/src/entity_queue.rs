@@ -186,6 +186,7 @@ mod tests {
 					node: OctreeNode::new(i as i32, 0, 0, 0),
 					output: MeshOutput::default(),
 					hint: PresentationHint::FadeIn { group_key },
+					timing_us: 0,
 				})
 				.collect(),
 		}

@@ -8,6 +8,7 @@
 //! - Space/Shift: Move up/down
 //! - Ctrl: Sprint
 
+mod fly_camera;
 mod scenes;
 mod shared;
 pub mod triplanar_material;
@@ -15,9 +16,9 @@ pub mod triplanar_material;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
+use fly_camera::CameraInputPlugin;
 use scenes::{noise_lod::NoiseLodPlugin, ScenePlugin};
 use shared::EguiPerfPlugin;
-use voxel_bevy::CameraInputPlugin;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]

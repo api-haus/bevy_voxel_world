@@ -160,7 +160,7 @@ impl Default for MinMaxAABB {
 }
 
 /// Mesh generation result.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct MeshOutput {
   /// Output vertices with positions, normals, and material weights.
   pub vertices: Vec<Vertex>,

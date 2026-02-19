@@ -4,17 +4,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use voxel_plugin::metrics::WorldMetrics;
-use voxel_plugin::octree::{OctreeConfig, OctreeLeaves, OctreeNode};
-
-
-/// Resource containing octree LOD state.
-#[derive(Resource)]
-pub struct OctreeLodState {
-  /// Set of current leaf nodes.
-  pub leaves: OctreeLeaves,
-  /// Octree configuration for coordinate mapping.
-  pub config: OctreeConfig,
-}
+use voxel_plugin::octree::OctreeNode;
 
 /// Resource mapping octree nodes to their mesh entities.
 #[derive(Resource, Default)]
@@ -68,11 +58,24 @@ impl VoxelMetricsResource {
     }
   }
 
-  /// Record refinement stats from async pipeline.
-  pub fn record_refinement_stats(&mut self, refine_us: u64, mesh_us: u64) {
+  /// Record refinement operations (subdivisions and collapses).
+  pub fn record_refinement_ops(&mut self, subdivisions: u32, collapses: u32) {
     if self.enabled {
-      self.current.record_refine_timing(refine_us);
-      self.current.record_mesh_timing(mesh_us);
+      self.current.record_refinement_ops(subdivisions, collapses);
+    }
+  }
+
+  /// Record refinement timing in microseconds.
+  pub fn record_refine_timing(&mut self, timing_us: u64) {
+    if self.enabled {
+      self.current.record_refine_timing(timing_us);
+    }
+  }
+
+  /// Record mesh generation timing in microseconds.
+  pub fn record_mesh_timing(&mut self, timing_us: u64) {
+    if self.enabled {
+      self.current.record_mesh_timing(timing_us);
     }
   }
 

@@ -1,11 +1,12 @@
 # Voxel Framework build commands
 
 # Build and deploy voxel_unity plugin to Unity
+# Metrics enabled by default - use voxel_world_get_metrics() to retrieve timing stats
 unity-plugin:
     cargo build -p voxel_unity --release
     mkdir -p ../Packages/im.pala.voxelmission/Plugins/x86_64
     cp target/release/libvoxel_unity.so ../Packages/im.pala.voxelmission/Plugins/x86_64/
-    @echo "Deployed libvoxel_unity.so to Unity Plugins"
+    @echo "Deployed libvoxel_unity.so to Unity Plugins (with metrics)"
 
 # Build all crates
 build-all:

@@ -127,6 +127,9 @@ pub fn process_transitions<S: VolumeSampler>(
   let mesh_results: Vec<_> = nodes_to_mesh
     .into_par_iter()
     .filter_map(|node| {
+      // Start timing for this mesh
+      let mesh_start = web_time::Instant::now();
+
       // Presample using centralized helper
       let sampled = sample_volume_for_node(&node, sampler, config);
 
@@ -151,10 +154,12 @@ pub fn process_transitions<S: VolumeSampler>(
         return None;
       }
 
+      let timing_us = mesh_start.elapsed().as_micros() as u64;
+
       Some(super::types::MeshResult {
         node,
         output,
-        timing_us: 0, // Skip timing for batch processing
+        timing_us,
         work_source: WorkSource::Refinement,
       })
     })

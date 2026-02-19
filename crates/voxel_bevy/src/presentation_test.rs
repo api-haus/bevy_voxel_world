@@ -625,8 +625,6 @@ fn test_ghost_cells_with_async_gap() {
   let mut presentation = MockBevyPresentation::new();
   presentation.initial_spawn(&[OctreeNode::new(0, 0, 0, 5)]);
 
-  let mut ghost_cells_detected = 0;
-
   println!(
     "Initial state: {} leaves, {} entities",
     world_leaves.len(),
@@ -732,7 +730,7 @@ fn test_ghost_cells_with_async_gap() {
 
   // Check for orphans
   presentation.check_orphans(0, &world_leaves);
-  ghost_cells_detected = presentation.violations.len();
+  let ghost_cells_detected = presentation.violations.len();
 
   println!("\n=== GHOST CELL CONFIRMATION TEST ===");
   println!("Ghost cells detected: {}", ghost_cells_detected);

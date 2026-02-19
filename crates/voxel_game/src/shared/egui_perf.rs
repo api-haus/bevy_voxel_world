@@ -45,6 +45,7 @@ impl Default for PerfWindow {
 
 /// Corner anchor for the window.
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Anchor {
   #[default]
   TopLeft,
@@ -79,6 +80,7 @@ pub struct PerfEntries {
   entries: Vec<PerfEntry>,
 }
 
+#[allow(dead_code)]
 impl PerfEntries {
   /// Clear all entries. Call at start of frame before adding new values.
   pub fn clear(&mut self) {

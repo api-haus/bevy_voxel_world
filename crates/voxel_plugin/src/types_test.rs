@@ -13,8 +13,8 @@ fn test_roundtrip_zero() {
 
 #[test]
 fn test_roundtrip_positive() {
-  // Use value within range (±RANGE_VOXELS = ±1.0)
-  let sdf = 0.5;
+  // Use value within range (±RANGE_VOXELS = ±0.1)
+  let sdf = 0.05;
   let stored = to_storage(sdf, TEST_VOXEL_SIZE);
   let recovered = to_float(stored, TEST_VOXEL_SIZE);
   // Should be within one quantization level
@@ -24,8 +24,8 @@ fn test_roundtrip_positive() {
 
 #[test]
 fn test_roundtrip_negative() {
-  // Use value within range (±RANGE_VOXELS = ±1.0)
-  let sdf = -0.5;
+  // Use value within range (±RANGE_VOXELS = ±0.1)
+  let sdf = -0.05;
   let stored = to_storage(sdf, TEST_VOXEL_SIZE);
   let recovered = to_float(stored, TEST_VOXEL_SIZE);
   let inv_scale = RANGE_VOXELS / 127.0;
@@ -41,24 +41,24 @@ fn test_clamping() {
 
 #[test]
 fn test_scale_factor() {
-  // Scale should map ±RANGE_VOXELS (±1.0) to ±127
-  // BASE_SCALE = 127.0 / RANGE_VOXELS = 127.0 / 1.0 = 127.0
-  assert!((BASE_SCALE - 127.0).abs() < 0.01);
+  // Scale should map ±RANGE_VOXELS (±0.1) to ±127
+  // BASE_SCALE = 127.0 / RANGE_VOXELS = 127.0 / 0.1 = 1270.0
+  assert!((BASE_SCALE - 1270.0).abs() < 0.01);
   assert_eq!(to_storage(RANGE_VOXELS, TEST_VOXEL_SIZE), 127);
   assert_eq!(to_storage(-RANGE_VOXELS, TEST_VOXEL_SIZE), -127);
 }
 
 #[test]
 fn test_voxel_size_scaling() {
-  // With voxel_size=2.0, an SDF of 2.0 world units = 1.0 voxel units
-  // Should produce same quantized value as sdf=1.0 with voxel_size=1.0
-  let stored_small = to_storage(1.0, 1.0);
-  let stored_large = to_storage(2.0, 2.0);
+  // With voxel_size=2.0, an SDF of 0.1 world units = 0.05 voxel units
+  // Should produce same quantized value as sdf=0.05 with voxel_size=1.0
+  let stored_small = to_storage(0.05, 1.0);
+  let stored_large = to_storage(0.1, 2.0);
   assert_eq!(stored_small, stored_large);
 
   // And recover correctly
   let recovered = to_float(stored_large, 2.0);
-  assert!((recovered - 2.0).abs() < 0.2); // Allow for quantization error
+  assert!((recovered - 0.1).abs() < 0.01); // Allow for quantization error
 }
 
 // General types tests

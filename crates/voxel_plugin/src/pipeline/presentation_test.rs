@@ -39,6 +39,7 @@ fn test_subdivide_produces_fade_in_hints() {
       .map(|&node| NodeMesh {
         node,
         output: make_sphere_mesh(),
+        timing_us: 0,
       })
       .collect(),
     transition_type: TransitionType::Subdivide,
@@ -66,6 +67,7 @@ fn test_merge_produces_fade_out_hints() {
     meshes: smallvec![NodeMesh {
       node: parent,
       output: make_sphere_mesh(),
+      timing_us: 0,
     }],
     transition_type: TransitionType::Merge,
   };
@@ -151,6 +153,7 @@ fn test_present_combines_grouped_and_ungrouped() {
       .map(|&node| NodeMesh {
         node,
         output: make_sphere_mesh(),
+        timing_us: 0,
       })
       .collect(),
     transition_type: TransitionType::Subdivide,
@@ -196,6 +199,7 @@ fn test_group_key_correct_in_all_chunks_of_group() {
       .map(|&node| NodeMesh {
         node,
         output: make_sphere_mesh(),
+        timing_us: 0,
       })
       .collect(),
     transition_type: TransitionType::Subdivide,
@@ -247,6 +251,7 @@ fn test_present_partial_group() {
       .map(|&node| NodeMesh {
         node,
         output: make_sphere_mesh(),
+        timing_us: 0,
       })
       .collect(),
     transition_type: TransitionType::Subdivide,

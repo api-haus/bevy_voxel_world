@@ -133,6 +133,11 @@ impl WorldChunkMap {
   pub fn world_count(&self) -> usize {
     self.worlds.len()
   }
+
+  /// Get all tracked world IDs.
+  pub fn tracked_world_ids(&self) -> impl Iterator<Item = WorldId> + '_ {
+    self.worlds.keys().copied()
+  }
 }
 
 // =============================================================================
@@ -179,22 +184,37 @@ pub fn sync_world_transforms(
 }
 
 /// System to cleanup chunk entities when a VoxelWorldRoot is despawned.
+///
+/// Since `RemovedComponents` doesn't provide the removed component's data,
+/// we compare live `VoxelWorldRoot` world IDs against `WorldChunkMap` to
+/// find orphaned worlds whose root entity was despawned.
 pub fn cleanup_despawned_worlds(
   mut removed: RemovedComponents<VoxelWorldRoot>,
-  commands: Commands,
-  chunk_map: ResMut<WorldChunkMap>,
-  chunks: Query<(Entity, &crate::components::VoxelChunk)>,
+  mut commands: Commands,
+  mut chunk_map: ResMut<WorldChunkMap>,
+  live_worlds: Query<&VoxelWorldRoot>,
 ) {
-  for _entity in removed.read() {
-    // Find all chunks that belong to despawned worlds
-    // Note: We need the WorldId from the component before it was removed
-    // This is a limitation - we'll clean up based on orphaned chunks instead
+  // Only run when a VoxelWorldRoot was actually removed
+  if removed.read().next().is_none() {
+    return;
   }
 
-  // Alternative: periodically clean up chunks whose world no longer exists
-  // This would require storing WorldId in VoxelChunk (which we do in the updated
-  // component)
-  let _ = (commands, chunk_map, chunks); // Silence unused warnings for now
+  // Collect live world IDs from remaining VoxelWorldRoot entities
+  let live_ids: std::collections::HashSet<WorldId> =
+    live_worlds.iter().map(|root| root.id()).collect();
+
+  // Find orphaned world IDs in the chunk map
+  let orphaned: Vec<WorldId> = chunk_map
+    .tracked_world_ids()
+    .filter(|id| !live_ids.contains(id))
+    .collect();
+
+  // Despawn all chunk entities for each orphaned world
+  for world_id in orphaned {
+    for entity in chunk_map.remove_world(world_id) {
+      commands.entity(entity).despawn();
+    }
+  }
 }
 
 #[cfg(test)]

@@ -57,6 +57,10 @@ pub use octree::OctreeNode;
 
 // Pipeline task graph for parallel voxel processing
 pub mod pipeline;
+pub use pipeline::{
+  process_transitions, ChunkPresentation, CompletedTransition, PresentationBatch,
+  PresentationHint, ReadyChunk, VolumeSampler,
+};
 
 // World isolation - multi-world support
 pub mod world;

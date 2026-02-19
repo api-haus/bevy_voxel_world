@@ -4,9 +4,9 @@
 //! at their shared edges when sampled through the full pipeline.
 
 use super::FastNoise2Terrain;
-use crate::constants::{SAMPLE_SIZE, SAMPLE_SIZE_CB};
+use crate::constants::SAMPLE_SIZE;
 use crate::octree::{OctreeConfig, OctreeNode};
-use crate::pipeline::{sample_volume_for_node, VolumeSampler};
+use crate::pipeline::sample_volume_for_node;
 
 /// Test edge coherency at voxel_size=1.0 through the full pipeline.
 #[test]

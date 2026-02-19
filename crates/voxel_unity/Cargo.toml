@@ -6,7 +6,14 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = ["metrics"]
+# Engine-agnostic metrics collection (enabled by default for Unity)
+metrics = ["voxel_plugin/metrics"]
+
 [dependencies]
 voxel_plugin = { path = "../voxel_plugin" }
 # Same version as voxel_plugin for DVec3 compatibility
 glam = { version = "0.30", features = ["std"] }
+# Parallel mesh generation
+rayon = { workspace = true }

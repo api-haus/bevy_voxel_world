@@ -88,6 +88,7 @@ pub fn compose(
             meshes.push(NodeMesh {
               node: result.node,
               output: result.output,
+              timing_us: result.timing_us,
             });
           }
         }
@@ -98,6 +99,7 @@ pub fn compose(
           meshes.push(NodeMesh {
             node: result.node,
             output: result.output,
+            timing_us: result.timing_us,
           });
         }
       }

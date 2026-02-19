@@ -71,6 +71,7 @@
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
+use glam::DVec3;
 use smallvec::SmallVec;
 
 use crate::constants::SAMPLE_SIZE_CB;
@@ -219,6 +220,9 @@ pub struct NodeMesh {
 
   /// The generated mesh output.
   pub output: MeshOutput,
+
+  /// Time taken to generate this mesh in microseconds.
+  pub timing_us: u64,
 }
 
 /// Group of related meshes from a single TransitionGroup.
@@ -270,6 +274,10 @@ pub struct ReadyChunk {
 
   /// Presentation hint for the renderer.
   pub hint: PresentationHint,
+
+  /// Time taken to generate this chunk in microseconds.
+  /// Includes presample, mesh generation, and composition.
+  pub timing_us: u64,
 }
 
 impl std::fmt::Debug for ReadyChunk {
@@ -279,6 +287,7 @@ impl std::fmt::Debug for ReadyChunk {
       .field("node", &self.node)
       .field("vertex_count", &self.output.vertices.len())
       .field("hint", &self.hint)
+      .field("timing_us", &self.timing_us)
       .finish()
   }
 }
@@ -336,4 +345,69 @@ impl Epoch {
   pub fn increment(&mut self) {
     self.0 += 1;
   }
+}
+
+// =============================================================================
+// PresentationBatch - Standardized bridge output
+// =============================================================================
+
+/// A chunk ready for presentation with pre-calculated transform.
+///
+/// Contains all data needed for the bridge to spawn an engine-specific entity.
+#[derive(Debug)]
+pub struct ChunkPresentation {
+  /// The octree node this chunk represents.
+  pub node: OctreeNode,
+
+  /// Local-space position (node minimum corner).
+  pub position: DVec3,
+
+  /// Uniform scale (voxel size at this LOD).
+  pub scale: f64,
+
+  /// Generated mesh output.
+  pub output: MeshOutput,
+
+  /// Presentation hint (FadeIn/FadeOut/Immediate).
+  pub hint: PresentationHint,
+}
+
+/// Standardized output from VoxelWorld::update().
+///
+/// Contains all spawn/despawn operations for the engine bridge to apply.
+/// The bridge processes `to_despawn` first, then `to_spawn` for atomic transitions.
+#[derive(Debug, Default)]
+pub struct PresentationBatch {
+  /// Nodes to despawn (process first for atomicity).
+  pub to_despawn: Vec<OctreeNode>,
+
+  /// Chunks to spawn (with pre-calculated position/scale).
+  pub to_spawn: Vec<ChunkPresentation>,
+}
+
+// =============================================================================
+// CompletedTransition - Atomic transition with ready meshes
+// =============================================================================
+
+/// A completed transition group ready for entity queue processing.
+///
+/// Contains both the octree changes (nodes to add/remove) and the
+/// ready meshes for spawning. Used by the entity queue to apply
+/// transitions atomically (despawn + spawn in same frame).
+#[derive(Debug)]
+pub struct CompletedTransition {
+  /// Parent node (group_key identifying this transition).
+  pub group_key: OctreeNode,
+
+  /// True if this is a merge (8 children → 1 parent), false for subdivide.
+  pub is_collapse: bool,
+
+  /// Nodes to remove/despawn (apply first).
+  pub nodes_to_remove: Vec<OctreeNode>,
+
+  /// Nodes to add (for tracking).
+  pub nodes_to_add: Vec<OctreeNode>,
+
+  /// Ready chunks with meshes (spawn after despawn).
+  pub ready_chunks: Vec<ReadyChunk>,
 }

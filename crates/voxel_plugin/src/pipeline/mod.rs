@@ -36,7 +36,6 @@ pub mod types;
 
 // Stage implementations
 pub mod async_process;
-pub mod async_refinement;
 pub mod composition;
 pub mod meshing;
 pub mod presample;
@@ -50,16 +49,12 @@ pub mod test_utils;
 // Re-exports
 // Async entry point (non-blocking, cross-platform)
 pub use async_process::AsyncPipeline;
-// Async refinement + mesh pipeline (moves refine() off main thread)
-pub use async_refinement::{
-	AsyncRefinementPipeline, CompletedTransition, RefinementRequest, RefinementResult,
-	RefinementStats,
-};
 // Presample helpers for direct sampling (e.g., startup, debugging)
 pub use presample::sample_volume_for_node;
 // Synchronous entry point
 pub use process::{process_transitions, process_transitions_timed, ProcessingStats};
 pub use types::{
-	Epoch, GroupedMesh, MeshInput, MeshResult, NodeMesh, PipelineEvent, PresampleOutput,
-	PresentationHint, ReadyChunk, SampledVolume, VolumeSampler, WorkSource,
+	ChunkPresentation, CompletedTransition, Epoch, GroupedMesh, MeshInput, MeshResult, NodeMesh,
+	PipelineEvent, PresampleOutput, PresentationBatch, PresentationHint, ReadyChunk, SampledVolume,
+	VolumeSampler, WorkSource,
 };

@@ -61,6 +61,19 @@ impl DAabb3 {
 			&& point.z <= self.max.z
 	}
 
+	/// Check if this AABB fully contains another AABB.
+	///
+	/// Returns true if the other AABB is entirely inside this one.
+	#[inline]
+	pub fn contains_aabb(&self, other: &DAabb3) -> bool {
+		other.min.x >= self.min.x
+			&& other.max.x <= self.max.x
+			&& other.min.y >= self.min.y
+			&& other.max.y <= self.max.y
+			&& other.min.z >= self.min.z
+			&& other.max.z <= self.max.z
+	}
+
 	/// Get the size of the AABB (max - min).
 	#[inline]
 	pub fn size(&self) -> DVec3 {
@@ -131,6 +144,30 @@ mod tests {
 		// Outside
 		assert!(!aabb.contains_point(DVec3::splat(-1.0)));
 		assert!(!aabb.contains_point(DVec3::splat(11.0)));
+	}
+
+	#[test]
+	fn test_contains_aabb() {
+		let outer = DAabb3::new(DVec3::ZERO, DVec3::splat(10.0));
+
+		// Fully inside
+		let inner = DAabb3::new(DVec3::splat(2.0), DVec3::splat(8.0));
+		assert!(outer.contains_aabb(&inner));
+
+		// Touching boundary (still contained)
+		let touching = DAabb3::new(DVec3::ZERO, DVec3::splat(5.0));
+		assert!(outer.contains_aabb(&touching));
+
+		// Same size (contained)
+		assert!(outer.contains_aabb(&outer));
+
+		// Partially outside (overlapping but not contained)
+		let partial = DAabb3::new(DVec3::splat(-2.0), DVec3::splat(5.0));
+		assert!(!outer.contains_aabb(&partial));
+
+		// Completely outside
+		let outside = DAabb3::new(DVec3::splat(15.0), DVec3::splat(20.0));
+		assert!(!outer.contains_aabb(&outside));
 	}
 
 	#[test]
