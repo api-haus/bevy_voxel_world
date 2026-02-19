@@ -67,7 +67,7 @@ async function cacheFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
 
-  const response = await fetch(request);
+  const response = await fetch(request, { cache: 'no-store' });
   if (response.ok) {
     const cache = await caches.open(CACHE_NAME);
     cache.put(request, response.clone());

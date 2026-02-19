@@ -3,7 +3,7 @@
   Cross-Origin-Embedder-Policy: require-corp
 
 /assets/*
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
 
 /dist/*
   Cache-Control: public, max-age=31536000, immutable
