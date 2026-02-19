@@ -17,6 +17,8 @@ jobs:
       BINARYEN_CORES: "1"  # Prevent wasm-opt SIGSEGV from race condition
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Install system dependencies
         run: |
