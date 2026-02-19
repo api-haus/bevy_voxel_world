@@ -16,10 +16,6 @@ use bevy::prelude::*;
 use bevy::camera::Exposure;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::{light_consts::lux, CascadeShadowConfigBuilder};
-// Atmosphere requires storage buffers in fragment shaders - not available on WebGL2
-// Available on: native, or WASM with webgpu feature
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu"))]
-use bevy::pbr::{Atmosphere, AtmosphereSettings, ScatteringMedium};
 use bevy::post_process::bloom::Bloom;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use rand::{Rng, SeedableRng};
@@ -243,37 +239,6 @@ struct InitialMeshGenEvent;
 // Setup
 // =============================================================================
 
-// Setup with atmosphere (native or WASM+WebGPU)
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu"))]
-fn setup(
-	mut commands: Commands,
-	mut meshes: ResMut<Assets<Mesh>>,
-	mut materials: ResMut<Assets<StandardMaterial>>,
-	mut triplanar_materials: ResMut<Assets<TriplanarMaterial>>,
-	mut scattering_mediums: ResMut<Assets<ScatteringMedium>>,
-	asset_server: Res<AssetServer>,
-	mut initial_gen_events: MessageWriter<InitialMeshGenEvent>,
-	camera_query: Query<Entity, With<crate::MainCamera>>,
-	settings: Res<UiSettings>,
-) {
-	setup_inner(
-		&mut commands,
-		&mut meshes,
-		&mut materials,
-		&mut triplanar_materials,
-		&asset_server,
-		&mut initial_gen_events,
-		&camera_query,
-		&settings,
-	);
-	setup_camera_and_lights(&mut commands, &mut scattering_mediums, &camera_query);
-	spawn_scale_reference_poles(&mut commands, &mut meshes, &mut materials);
-	initial_gen_events.write(InitialMeshGenEvent);
-	info!("[NoiseLod] Scene setup complete - generating initial meshes...");
-}
-
-// Setup without atmosphere (WASM+WebGL2 - no storage buffer support)
-#[cfg(all(target_arch = "wasm32", not(feature = "webgpu")))]
 fn setup(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
@@ -610,11 +575,8 @@ fn spawn_triplanar_chunk_entity_with_marker(
   }
 }
 
-/// Setup camera and lighting with atmospheric scattering (native or WASM+WebGPU)
-#[cfg(any(not(target_arch = "wasm32"), feature = "webgpu"))]
 fn setup_camera_and_lights(
   commands: &mut Commands,
-  scattering_mediums: &mut Assets<ScatteringMedium>,
   camera_query: &Query<Entity, With<crate::MainCamera>>,
 ) {
   let camera_entity = get_or_spawn_camera(commands, camera_query);
@@ -631,53 +593,13 @@ fn setup_camera_and_lights(
       pitch,
     }),
     VoxelViewer,
-    // Earthlike atmosphere - physically-based atmospheric scattering
-    Atmosphere::earthlike(scattering_mediums.add(ScatteringMedium::default())),
-    AtmosphereSettings::default(),
-    // Higher exposure to compensate for bright raw sunlight illuminance
     Exposure { ev100: 13.0 },
     Tonemapping::AcesFitted,
     Bloom::NATURAL,
   ));
 
   spawn_sun_and_shadows(commands);
-  // Disable ambient light - atmosphere provides ambient via IBL
   commands.insert_resource(GlobalAmbientLight::NONE);
-}
-
-/// Setup camera and lighting for WASM+WebGL2 (no atmosphere - requires storage buffers not available)
-#[cfg(all(target_arch = "wasm32", not(feature = "webgpu")))]
-fn setup_camera_and_lights(
-  commands: &mut Commands,
-  camera_query: &Query<Entity, With<crate::MainCamera>>,
-) {
-  let camera_entity = get_or_spawn_camera(commands, camera_query);
-  let (camera_pos, yaw, pitch) = camera_transform();
-
-  commands.entity(camera_entity).insert((
-    Transform::from_translation(camera_pos)
-      .with_rotation(Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0)),
-    fly_camera_input_bundle(FlyCamera {
-      speed: 50.0,
-      mouse_sensitivity: 0.003,
-      gamepad_sensitivity: 2.0,
-      yaw,
-      pitch,
-    }),
-    VoxelViewer,
-    // Lower exposure for non-atmospheric rendering
-    Exposure { ev100: 10.0 },
-    Tonemapping::AcesFitted,
-    Bloom::NATURAL,
-  ));
-
-  spawn_sun_and_shadows(commands);
-  // Use ambient light since we don't have atmosphere for IBL
-  commands.insert_resource(GlobalAmbientLight {
-    color: Color::srgb(0.5, 0.6, 0.8),
-    brightness: 500.0, // Moderate ambient
-    ..default()
-  });
 }
 
 /// Get existing MainCamera or spawn a new one
