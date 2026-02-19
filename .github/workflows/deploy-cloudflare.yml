@@ -57,7 +57,7 @@ jobs:
           path: |
             target/wasm32-unknown-emscripten
             crates/voxel_noise/dist
-          key: voxel-noise-emscripten-${{ hashFiles('crates/voxel_noise/Cargo.toml', 'crates/voxel_noise/src/**') }}
+          key: voxel-noise-emscripten-${{ hashFiles('Cargo.lock', 'crates/voxel_noise/src/**') }}
           restore-keys: |
             voxel-noise-emscripten-
 
