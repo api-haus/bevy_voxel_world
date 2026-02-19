@@ -76,7 +76,34 @@
 <body>
 <div id="loading"><div id="progress-bar"><div id="progress-fill" class="indeterminate"></div></div><div id="progress-text">Loading...</div></div>
 <script>
+    // Prevent browser shortcuts that interfere with gameplay.
+    window.addEventListener("keydown", function (e) {
+        // Always allow dev-tools shortcuts
+        if (e.key === "F12") return;
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey &&
+            (e.code === "KeyI" || e.code === "KeyJ" || e.code === "KeyC")) return;
+
+        // Block Ctrl/Meta combos that browsers act on (Ctrl+S save, Ctrl+D bookmark, etc.)
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            return;
+        }
+
+        // Block standalone keys that interfere with gameplay
+        if (["Tab", "F1", "F3", "F5", "F7"].includes(e.key)) {
+            e.preventDefault();
+        }
+    }, { capture: true });
+
+    // Safety net: show "Leave page?" dialog on accidental tab close.
+    window.addEventListener("beforeunload", function (e) {
+        e.preventDefault();
+        e.returnValue = "";
+    });
+
+    // Prevent right-click context menu (right-mouse is used for camera look)
     document.addEventListener('contextmenu', e => e.preventDefault());
+
     // Progress bar API (used by custom init.js in production)
     window.updateLoadingProgress = (l, t) => {
         const fill = document.getElementById('progress-fill');

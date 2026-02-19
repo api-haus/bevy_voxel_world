@@ -63,17 +63,17 @@ pub struct Move;
 #[action_output(Vec2)]
 pub struct Look;
 
-/// Move up action (Space or right trigger) - outputs bool.
+/// Move up action (E or right trigger) - outputs bool.
 #[derive(Debug, InputAction)]
 #[action_output(bool)]
 pub struct MoveUp;
 
-/// Move down action (Shift or left trigger) - outputs bool.
+/// Move down action (Q or left trigger) - outputs bool.
 #[derive(Debug, InputAction)]
 #[action_output(bool)]
 pub struct MoveDown;
 
-/// Sprint modifier (Ctrl or left bumper) - outputs bool.
+/// Sprint modifier (Shift or left bumper) - outputs bool.
 #[derive(Debug, InputAction)]
 #[action_output(bool)]
 pub struct Sprint;
@@ -114,20 +114,20 @@ pub fn fly_camera_input_bundle(fly_camera: FlyCamera) -> impl Bundle {
 				Action::<Look>::default(),
 				bindings![Binding::mouse_motion()],
 			),
-			// Move Up: Space + Right Trigger
+			// Move Up: E + Right Trigger
 			(
 				Action::<MoveUp>::default(),
-				bindings![KeyCode::Space, GamepadButton::RightTrigger],
+				bindings![KeyCode::KeyE, GamepadButton::RightTrigger],
 			),
-			// Move Down: Shift + Left Trigger
+			// Move Down: Q + Left Trigger
 			(
 				Action::<MoveDown>::default(),
-				bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger],
+				bindings![KeyCode::KeyQ, GamepadButton::LeftTrigger],
 			),
-			// Sprint: Ctrl + Left Bumper
+			// Sprint: Shift + Left Bumper
 			(
 				Action::<Sprint>::default(),
-				bindings![KeyCode::ControlLeft, GamepadButton::LeftTrigger2],
+				bindings![KeyCode::ShiftLeft, GamepadButton::LeftTrigger2],
 			),
 			// Enable Look: Right Mouse Button
 			(
@@ -208,7 +208,7 @@ fn on_move_down_completed(trigger: On<Complete<MoveDown>>, mut query: Query<&mut
 	}
 }
 
-/// Observer: Sprint (Ctrl/left bumper) - active
+/// Observer: Sprint (Shift/left bumper) - active
 fn on_sprint(trigger: On<Fire<Sprint>>, mut query: Query<&mut FlyCameraInput>) {
 	if let Ok(mut input) = query.get_mut(trigger.context) {
 		input.sprint = trigger.value;

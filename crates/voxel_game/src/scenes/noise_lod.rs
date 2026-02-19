@@ -7,8 +7,8 @@
 //! Controls:
 //! - Right-click + drag: Look around
 //! - WASD: Move camera
-//! - Space/Shift: Move up/down
-//! - Ctrl: Sprint
+//! - Q/E: Move up/down
+//! - Shift: Sprint
 
 use std::collections::HashMap;
 
@@ -751,7 +751,7 @@ fn instructions_ui(mut contexts: EguiContexts) {
     .show(ctx, |ui| {
       ui.label(
         egui::RichText::new(
-          "Right-click + drag to look | WASD to move | Space/Shift up/down | Ctrl to sprint",
+          "Right-click + drag to look | WASD to move | Q/E up/down | Shift to sprint",
         )
         .color(egui::Color32::from_rgb(200, 200, 200))
         .size(14.0),
