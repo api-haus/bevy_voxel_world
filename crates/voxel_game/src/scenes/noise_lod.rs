@@ -33,8 +33,7 @@ use voxel_plugin::noise::FastNoise2Terrain;
 use voxel_plugin::octree::{
 	DAabb3, OctreeConfig, OctreeNode, RefinementBudget, TransitionGroup, TransitionType,
 };
-use voxel_plugin::pipeline::{AsyncPipeline, PipelineEvent};
-use voxel_plugin::process_transitions;
+use voxel_plugin::pipeline::{AsyncPipeline, CompletedTransition, PipelineEvent, ReadyChunk};
 // WASM compat: std::time::Instant panics on wasm32
 use web_time::Instant;
 
@@ -70,6 +69,7 @@ impl Plugin for NoiseLodPlugin {
           initial_mesh_gen.run_if(in_state(Scene::NoiseLod)),
           poll_initial_mesh_gen.run_if(in_state(Scene::NoiseLod)),
           run_refinement.run_if(in_state(Scene::NoiseLod)),
+          poll_refinement.run_if(in_state(Scene::NoiseLod)),
           process_entity_queue.run_if(in_state(Scene::NoiseLod)),
           continuous_refinement.run_if(in_state(Scene::NoiseLod)),
         ),
@@ -186,26 +186,32 @@ impl Default for UiSettings {
 /// Tracks entity processing queues and continuous refinement state.
 #[derive(Resource)]
 struct AsyncRefinementState {
-	/// Old pipeline (for initial mesh gen only).
+	/// Pipeline for initial mesh gen.
 	initial_pipeline: AsyncPipeline,
+	/// Pipeline for continuous refinement (non-blocking).
+	refine_pipeline: AsyncPipeline,
 	/// Time-budgeted entity operation queue.
 	entity_queue: EntityQueue,
 	/// Whether continuous refinement is enabled.
 	continuous: bool,
 	/// Frames since last refinement check (for throttling continuous mode).
 	frames_since_check: u32,
+	/// Transition groups awaiting mesh results from refine_pipeline.
+	pending_transitions: Vec<TransitionGroup>,
 }
 
 impl Default for AsyncRefinementState {
 	fn default() -> Self {
 		Self {
 			initial_pipeline: AsyncPipeline::new(),
+			refine_pipeline: AsyncPipeline::new(),
 			entity_queue: EntityQueue::new(EntityQueueConfig {
 				max_groups_per_frame: 8, // Apply up to 8 transition groups per frame
 				max_ms_per_frame: 4.0,   // 4ms budget
 			}),
 			continuous: false,
 			frames_since_check: 0,
+			pending_transitions: Vec::new(),
 		}
 	}
 }
@@ -1023,7 +1029,7 @@ fn rebuild_world(
 	};
 
 	// Use centralized process_transitions for parallel mesh generation
-	let ready_chunks = process_transitions(
+	let ready_chunks = voxel_plugin::process_transitions(
 		world_id,
 		&[initial_transition],
 		&world_root.world.sampler,
@@ -1086,18 +1092,22 @@ const CONTINUOUS_REFINEMENT_INTERVAL: u32 = 5;
 
 /// System to run refinement when triggered by message.
 ///
-/// Uses sync VoxelWorld::refine() API followed by centralized process_transitions():
-/// - Computes LOD transitions based on viewer position
-/// - Updates world leaves
-/// - Generates meshes in parallel via voxel_plugin's pipeline
+/// Computes LOD transitions synchronously (fast) then dispatches mesh
+/// generation to a background rayon task via `refine_pipeline`.
 fn run_refinement(
 	mut refine_events: MessageReader<RefineWorldEvent>,
 	mut async_state: ResMut<AsyncRefinementState>,
 	viewers: Query<&GlobalTransform, With<VoxelViewer>>,
 	mut world_roots: Query<&mut VoxelWorldRoot>,
+	settings: Res<UiSettings>,
 	mut metrics: ResMut<VoxelMetricsResource>,
 ) {
 	if refine_events.read().next().is_none() {
+		return;
+	}
+
+	// Don't start new refinement if previous one is still in-flight
+	if async_state.refine_pipeline.is_busy() {
 		return;
 	}
 
@@ -1133,35 +1143,78 @@ fn run_refinement(
 	}
 
 	let world_id = world_root.id();
+	let config = world_root.config().clone();
+	let leaves = world_root.world.leaves.as_set().clone();
 
-	// Use centralized process_transitions for parallel mesh generation
-	// This handles: presample, surface crossing check, neighbor mask, meshing
-	let mesh_start = Instant::now();
-	let ready_chunks = voxel_plugin::process_transitions(
+	// Store transition groups for later (when mesh results arrive)
+	async_state.pending_transitions = output.transition_groups.clone();
+
+	// Create a fresh sampler for the background task
+	let sampler = FastNoise2Terrain::new(settings.current.current_seed);
+
+	// Dispatch mesh generation to rayon thread pool (non-blocking)
+	async_state.refine_pipeline.start(
 		world_id,
-		&output.transition_groups,
-		&world_root.world.sampler,
-		world_root.world.leaves.as_set(),
-		world_root.config(),
+		output.transition_groups,
+		sampler,
+		leaves,
+		config,
 	);
-	let mesh_us = mesh_start.elapsed().as_micros() as u64;
 
-	// Build a hashmap for O(1) lookup when grouping
-	let ready_by_node: HashMap<OctreeNode, voxel_plugin::pipeline::ReadyChunk> = ready_chunks
+	info!(
+		"[Refine] Dispatched async mesh gen (subdivs: {}, collapses: {})",
+		output.stats.subdivisions_performed,
+		output.stats.collapses_performed,
+	);
+
+	metrics.record_refinement_ops(
+		output.stats.subdivisions_performed as u32,
+		output.stats.collapses_performed as u32,
+	);
+	metrics.record_refine_timing(refine_us);
+}
+
+/// System to poll for refinement mesh generation results.
+///
+/// When `refine_pipeline` completes, builds `CompletedTransition`s from the
+/// ready chunks and queues them to the entity queue for frame-budgeted application.
+fn poll_refinement(
+	mut async_state: ResMut<AsyncRefinementState>,
+	world_roots: Query<&VoxelWorldRoot>,
+) {
+	let Some(events) = async_state.refine_pipeline.poll_events() else {
+		return;
+	};
+
+	let Ok(world_root) = world_roots.single() else {
+		return;
+	};
+
+	let _ = world_root; // used only to confirm world exists
+
+	// Collect all ready chunks from pipeline events
+	let mut all_ready: Vec<ReadyChunk> = Vec::new();
+	for event in events {
+		if let PipelineEvent::ChunksReady { chunks, .. } = event {
+			all_ready.extend(chunks);
+		}
+	}
+
+	// Build ready_by_node for O(1) lookup
+	let ready_by_node: HashMap<OctreeNode, ReadyChunk> = all_ready
 		.into_iter()
 		.map(|c| (c.node, c))
 		.collect();
 
 	// Build transitions for entity queue (preserves atomic grouping)
-	let transitions: Vec<_> = output
-		.transition_groups
+	let transitions: Vec<_> = std::mem::take(&mut async_state.pending_transitions)
 		.into_iter()
 		.map(|group| {
 			let ready_for_group: Vec<_> = group
 				.nodes_to_add
 				.iter()
 				.filter_map(|node| ready_by_node.get(node))
-				.map(|c| voxel_plugin::pipeline::ReadyChunk {
+				.map(|c| ReadyChunk {
 					world_id: c.world_id,
 					node: c.node,
 					output: c.output.clone(),
@@ -1170,7 +1223,7 @@ fn run_refinement(
 				})
 				.collect();
 
-			voxel_plugin::pipeline::CompletedTransition {
+			CompletedTransition {
 				group_key: group.group_key,
 				is_collapse: matches!(group.transition_type, TransitionType::Merge),
 				nodes_to_remove: group.nodes_to_remove.to_vec(),
@@ -1186,20 +1239,10 @@ fn run_refinement(
 	async_state.entity_queue.queue_transitions(transitions);
 
 	info!(
-		"[Refine] Queued {} groups: {} despawns, {} spawns (subdivs: {}, collapses: {})",
-		output.stats.subdivisions_performed + output.stats.collapses_performed,
+		"[Refine] Mesh gen complete: {} despawns, {} spawns queued",
 		num_despawns,
 		num_spawns,
-		output.stats.subdivisions_performed,
-		output.stats.collapses_performed,
 	);
-
-	metrics.record_refinement_ops(
-		output.stats.subdivisions_performed as u32,
-		output.stats.collapses_performed as u32,
-	);
-	metrics.record_refine_timing(refine_us);
-	metrics.record_mesh_timing(mesh_us);
 }
 
 /// System to process queued transition groups atomically.
@@ -1323,6 +1366,11 @@ fn continuous_refinement(
 	mut refine_events: MessageWriter<RefineWorldEvent>,
 ) {
 	if !async_state.continuous {
+		return;
+	}
+
+	// Don't trigger new refinement while previous mesh gen is in-flight
+	if async_state.refine_pipeline.is_busy() {
 		return;
 	}
 
