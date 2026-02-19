@@ -108,6 +108,9 @@ jobs:
       - name: Show sccache stats
         run: sccache --show-stats
 
+      - name: Remove source textures from dist
+        run: rm -f crates/voxel_game/dist/assets/textures/terrain/*.png
+
       # Upload large WASM file to R2 (bypasses Pages 25MB limit)
       - name: Upload WASM to R2
         env:
