@@ -41,7 +41,6 @@ export function vx_create(encoded) {
   const handle = module._vx_noise_create(strPtr);
   module._free(strPtr);
 
-  console.log('[vx_create] encoded:', encoded.substring(0, 30) + '...', 'handle:', handle);
   return handle;
 }
 
@@ -63,11 +62,6 @@ export function vx_gen_3d(handle, xOff, yOff, zOff, xCnt, yCnt, zCnt, xStep, ySt
   const result = new Float32Array(module.HEAPF32.buffer, outPtr, count).slice();
   module._free(outPtr);
 
-  // Debug: log sample of values
-  const min = Math.min(...result);
-  const max = Math.max(...result);
-  console.log('[vx_gen_3d] handle:', handle, 'count:', count, 'min:', min.toFixed(3), 'max:', max.toFixed(3));
-
   return result;
 }
 
@@ -88,12 +82,6 @@ export function vx_gen_2d(handle, xOff, yOff, xCnt, yCnt, xStep, yStep, seed) {
 
   const result = new Float32Array(module.HEAPF32.buffer, outPtr, count).slice();
   module._free(outPtr);
-
-  // Debug: log sample of values
-  const min = Math.min(...result);
-  const max = Math.max(...result);
-  const sample = [result[0], result[Math.floor(count / 4)], result[Math.floor(count / 2)], result[count - 1]];
-  console.log('[vx_gen_2d] handle:', handle, 'count:', count, 'min:', min.toFixed(3), 'max:', max.toFixed(3), 'sample:', sample.map(v => v.toFixed(3)));
 
   return result;
 }
