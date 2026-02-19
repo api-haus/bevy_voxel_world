@@ -125,7 +125,15 @@ fn fragment(
 
     // Get world position and normal for triplanar sampling
     let world_pos = in.world_position.xyz;
-    let world_normal = normalize(in.world_normal);
+    // Guard against zero-length normals that produce NaN via normalize()
+    // (common on WebGL2 due to lower precision)
+    var world_normal = in.world_normal;
+    let normal_len_sq = dot(world_normal, world_normal);
+    if normal_len_sq < 0.0001 {
+        world_normal = vec3<f32>(0.0, 1.0, 0.0);
+    } else {
+        world_normal = world_normal * inverseSqrt(normal_len_sq);
+    }
 
     // Get material blend weights from vertex color
 #ifdef VERTEX_COLORS
@@ -157,6 +165,8 @@ fn fragment(
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+    // Clamp to prevent NaN/negative values from reaching bloom
+    out.color = max(out.color, vec4<f32>(0.0));
 #endif
 
     return out;

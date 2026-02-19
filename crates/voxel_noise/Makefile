@@ -18,9 +18,9 @@
 # Output directory for WASM artifacts
 DIST_DIR = dist
 
-# Workspace root (target is there, not in crate dir)
-WORKSPACE_ROOT = ../..
-TARGET_DIR = $(WORKSPACE_ROOT)/target/wasm32-unknown-emscripten/release
+# Resolve target dir via cargo metadata (respects CARGO_TARGET_DIR / config.toml)
+CARGO_TARGET_DIR := $(shell cargo metadata --format-version 1 --no-deps 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['target_directory'])" 2>/dev/null || echo "../../target")
+TARGET_DIR = $(CARGO_TARGET_DIR)/wasm32-unknown-emscripten/release
 
 # Source files to track for incremental builds
 SOURCES = $(wildcard src/*.rs) Cargo.toml
