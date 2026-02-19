@@ -12,7 +12,7 @@ mod packer;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use ktx2_rw::{Ktx2Texture, VkFormat};
+use ktx2_rw::{BasisCompressionParams, Ktx2Texture, VkFormat};
 use std::path::{Path, PathBuf};
 
 use config::Config;
@@ -80,12 +80,18 @@ fn main() -> Result<()> {
 	// Build and save texture arrays
 	println!("\nBuilding KTX2 arrays...");
 
+	let thread_count = std::thread::available_parallelism()
+		.map(|n| n.get() as u32)
+		.unwrap_or(4);
+
 	// Diffuse+Height array (sRGB for diffuse colors)
 	build_ktx2_array(
 		&packed_layers.iter().map(|l| &l.diffuse_height).collect::<Vec<_>>(),
 		config.output_size,
 		VkFormat::R8G8B8A8Srgb, // sRGB for color data
 		&output_dir.join("diffuse_height.ktx2"),
+		false,
+		thread_count,
 	)
 	.context("Building diffuse_height.ktx2")?;
 	println!("  ✓ diffuse_height.ktx2");
@@ -96,6 +102,8 @@ fn main() -> Result<()> {
 		config.output_size,
 		VkFormat::R8G8B8A8Unorm, // Linear for normal data
 		&output_dir.join("normal.ktx2"),
+		true,
+		thread_count,
 	)
 	.context("Building normal.ktx2")?;
 	println!("  ✓ normal.ktx2");
@@ -106,6 +114,8 @@ fn main() -> Result<()> {
 		config.output_size,
 		VkFormat::R8G8B8A8Unorm, // Linear for material data
 		&output_dir.join("material.ktx2"),
+		false,
+		thread_count,
 	)
 	.context("Building material.ktx2")?;
 	println!("  ✓ material.ktx2");
@@ -115,12 +125,14 @@ fn main() -> Result<()> {
 	Ok(())
 }
 
-/// Build a KTX2 2D array texture from packed layers.
+/// Build a KTX2 2D array texture from packed layers with Basis Universal compression.
 fn build_ktx2_array(
 	layers: &[&image::RgbaImage],
 	size: u32,
 	format: VkFormat,
 	output_path: &Path,
+	is_normal_map: bool,
+	thread_count: u32,
 ) -> Result<()> {
 	let num_layers = layers.len() as u32;
 
@@ -135,6 +147,16 @@ fn build_ktx2_array(
 			.set_image_data(0, layer_idx as u32, 0, raw_data)
 			.with_context(|| format!("Failed to set image data for layer {}", layer_idx))?;
 	}
+
+	// Compress with Basis Universal (ETC1S mode - best size reduction)
+	let params = BasisCompressionParams::builder()
+		.quality_level(128)
+		.thread_count(thread_count)
+		.normal_map(is_normal_map)
+		.build();
+	texture
+		.compress_basis(&params)
+		.context("Basis Universal compression failed")?;
 
 	// Write to file
 	texture
