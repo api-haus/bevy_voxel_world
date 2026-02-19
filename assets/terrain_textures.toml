@@ -2,7 +2,7 @@
 # Run `just bake-textures` to build KTX2 arrays
 
 output_dir = "../crates/voxel_game/assets/textures/terrain"
-output_size = 1024  # All textures resized to 1024x1024
+output_size = 512
 
 # Layer 0: Grass (low areas, flat terrain)
 [[layers]]
